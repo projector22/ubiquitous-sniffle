@@ -5,7 +5,7 @@ import subprocess
 import os
 
 OUTPUT = os.getcwd()
-JSON = "spotdll.json"
+JSON = os.path.expanduser("~/bin/spotdll.json")
 
 # Load the JSON data from the file
 with open(JSON, 'r') as f:
