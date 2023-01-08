@@ -56,8 +56,6 @@ class Logger():
         json.dump(existing_log, self.file, indent=2)
         self._close()
 
-
-
 class Spotdll():
     """Perform a batch spotdl task.
     """
@@ -164,6 +162,5 @@ class Spotdll():
         wd = self.cwd + '/' + album
         mkdir(wd)
         run(['spotdl', 'download', url], cwd=wd)
-
 
 spotdll = Spotdll(args)
