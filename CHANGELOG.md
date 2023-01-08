@@ -1,6 +1,14 @@
 # Ubiquitous Sniffle
 
-## v0.2.0
+## v0.2.1 - 2023-01-08
+
+## Changed
+
+- Changed location of log to home folder
+
+---
+
+## v0.2.0 - 2023-01-08
 
 ### Added
 

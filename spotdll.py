@@ -23,7 +23,7 @@ class Logger():
         """
         self.artist = artist
         self.data = data
-        self.log_file = expanduser('~/bin/apps/ubiquitous-sniffle/log.json')
+        self.log_file = expanduser('~/spotdll/log.json')
         self._create_log_if_not_exists()
 
 
