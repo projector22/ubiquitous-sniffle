@@ -9,16 +9,21 @@ args = vars(ap.parse_args())
 
 class Spotdll():
 
-    def __init__(self, args):
+    def __init__(self, args: dict) -> None:
+        """Class constructor
+
+        Args:
+            args (dict): The arguments parsed to the script.
+        """
         from os import getcwd
         from os.path import expanduser
         self.cwd = getcwd()
         self.json_path = expanduser(self.cwd + "/spotdll.json")
         self.data = self.read_validate_json()
+
         for album, url in self.data.items():
             self.execute_download(album, url)
         
-        # print(self.data)
 
     def exit(self) -> None:
         """Kills the script as required.
@@ -69,15 +74,5 @@ class Spotdll():
         mkdir(wd)
         run(['spotdl', 'download', url], cwd=wd)
 
-        
-        
-
-
 
 spotdll = Spotdll(args)
-
-# # Loop through the album names and URLs in the JSON data
-# for album, url in data.items():
-#     # Use subprocess to call the spotdl command with the URL
-
-#     
