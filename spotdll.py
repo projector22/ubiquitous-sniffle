@@ -35,6 +35,10 @@ class Spotdll():
         for album, url in self.data.items():
             self.execute_download(album, url)
 
+        if self.delete_when_complete == True:
+            from os import remove
+            remove(self.json_path)
+
 
     def _handle_arguments(self) -> None:
         """Goes through parsed atguments and handle as needed.
