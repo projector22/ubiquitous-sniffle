@@ -46,7 +46,7 @@ class Spotdll():
             self.delete_when_complete = True
 
         if self.args["set_json_path"] != None:
-            self.json_path = self.args["-s"]
+            self.json_path = self.args["set_json_path"]
 
 
     def generate_json_file(self) -> None:
