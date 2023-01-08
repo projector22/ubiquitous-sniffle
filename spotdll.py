@@ -4,6 +4,8 @@ import argparse
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--create-json", required=False, action="store_true", help="Rather than download albums, generate a spotdll.json file")
+ap.add_argument("-s", "--set-json-path", required=False, help="Define a seperate path for the JSON file.")
+ap.add_argument("-d", "--delete-json", required=False, action="store_true", help="Deletes the JSON file, after the process is complete.")
 
 args = vars(ap.parse_args())
 
@@ -16,18 +18,56 @@ class Spotdll():
             args (dict): The arguments parsed to the script.
         """
         from os import getcwd
-        from os.path import expanduser
+        from os.path import expanduser        
+
+        self.args = args
+        self.delete_when_complete = False
+        
+        self.sample_json = expanduser('~/bin/apps/ubiquitous-sniffle/spotdll-sample.json')
+        
         self.cwd = getcwd()
         self.json_path = expanduser(self.cwd + "/spotdll.json")
+
+        self._handle_arguments()
+
         self.data = self.read_validate_json()
 
         for album, url in self.data.items():
             self.execute_download(album, url)
-        
 
-    def exit(self) -> None:
-        """Kills the script as required.
+
+    def _handle_arguments(self) -> None:
+        """Goes through parsed atguments and handle as needed.
         """
+        if self.args["create_json"] == True:
+            self.generate_json_file()
+
+        if self.args["delete_json"] == True:
+            self.delete_when_complete = True
+
+        if self.args["set_json_path"] != None:
+            self.json_path = self.args["-s"]
+
+
+    def generate_json_file(self) -> None:
+        """Generate a JSON file in the CWD as required. Will not overwrite the file if it already exists
+        """
+        from os.path import exists
+        if exists(self.json_path):
+            self.exit("JSON file " + self.json_path + " already exists, cancelling creation.")
+        from shutil import copy
+        copy(self.sample_json, self.json_path)
+        self.exit("JSON file " + self.json_path + " has been created.")
+
+
+    def exit(self, closing_message: str = None) -> None:
+        """A tool to kill the script immediately.
+
+        Args:
+            closing_message (str, optional): An optional closing message to be printed. Defaults to None.
+        """
+        if closing_message is not None:
+            print(closing_message)
         import sys
         sys.exit()
 
@@ -45,8 +85,7 @@ class Spotdll():
         import json
         from os.path import exists
         if not exists(self.json_path):
-            print(self.json_path + " doesn't exist. There is nothing to download therefore the task cannot continue.")
-            self.exit()
+            self.exit(self.json_path + " doesn't exist. There is nothing to download therefore the task cannot continue.")
         try:
             file = open(self.json_path, 'r')
             data = json.load(file)
@@ -54,8 +93,7 @@ class Spotdll():
                 raise json.decoder.JSONDecodeError()
             return data
         except json.decoder.JSONDecodeError:
-            print("Invalid data in spotdll.json")
-            self.exit()
+            self.exit("Invalid data in spotdll.json")
         finally:
             file.close()
 
