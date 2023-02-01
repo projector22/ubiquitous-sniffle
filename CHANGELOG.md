@@ -2,7 +2,7 @@
 
 ## v0.2.2 - 2023-02-01
 
-## Added
+### Added
 
 - Added a nano edit on creating the json
 
@@ -10,7 +10,7 @@
 
 - Fixed log creation.
 
-## Changed
+### Changed
 
 - Changed log path to ~/.spotdll/log.json
 
