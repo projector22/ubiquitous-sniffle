@@ -1,5 +1,17 @@
 # Ubiquitous Sniffle
 
+## c0.2.2 - 2023-02-01
+
+### Fixed
+
+- Fixed log creation.
+
+## Changed
+
+- Changed log path to ~/.spotdll/log.json
+
+---
+
 ## v0.2.1 - 2023-01-08
 
 ## Changed

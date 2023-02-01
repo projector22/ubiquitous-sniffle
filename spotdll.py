@@ -2,7 +2,7 @@
 
 import argparse
 import json
-from os.path import expanduser, exists
+from os.path import expanduser, exists, makedirs, dirname
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--create-json", required=False, action="store_true", help="Rather than download albums, generate a spotdll.json file")
@@ -23,17 +23,19 @@ class Logger():
         """
         self.artist = artist
         self.data = data
-        self.log_file = expanduser('~/spotdll/log.json')
+        self.log_file = expanduser('~/.spotdll/log.json')
         self._create_log_if_not_exists()
 
 
     def _create_log_if_not_exists(self) -> None:
         """Create the log file if it doesn't exist.
         """
-        if not exists(self.log_file):
-            self.file = open(self.log_file, 'w')
-            json.dump({}, self.file)
-            self._close()
+        directory = dirname(self.log_file)
+        if not exists(directory):
+            makedirs(directory)
+        self.file = open(self.log_file, 'w')
+        json.dump({}, self.file)
+        self._close()
 
 
     def _close(self) -> None:
@@ -52,7 +54,7 @@ class Logger():
             existing_log[self.artist] = {}
         for album, url in self.data.items():
             existing_log[self.artist][album] = url
-        self.file = open(self.log_file, 'w')
+        self.file = open(self.log_file, 'a')
         json.dump(existing_log, self.file, indent=2)
         self._close()
 
@@ -104,7 +106,8 @@ class Spotdll():
 
 
     def generate_json_file(self) -> None:
-        """Generate a JSON file in the CWD as required. Will not overwrite the file if it already exists
+        """Generate a JSON file in the CWD as required. Will not overwrite the
+        file if it already exists
         """
         if exists(self.json_path):
             self.exit("JSON file " + self.json_path + " already exists, cancelling creation.")
@@ -117,7 +120,8 @@ class Spotdll():
         """A tool to kill the script immediately.
 
         Args:
-            closing_message (str, optional): An optional closing message to be printed. Defaults to None.
+            closing_message (str, optional): An optional closing message
+            to be printed. Defaults to None.
         """
         if closing_message is not None:
             print(closing_message)
@@ -126,8 +130,9 @@ class Spotdll():
 
 
     def read_validate_json(self) -> dict|list:
-        """Reads and validates the spotdll.json file. If the file doesn't exist or is invalid, an error is shown and
-        the script exits gracefully. Otherwise reads the json to `self.data`.
+        """Reads and validates the spotdll.json file. If the file doesn't exist
+        or is invalid, an error is shown and the script exits gracefully.
+        Otherwise reads the json to `self.data`.
 
         Raises:
             `json.decoder.JSONDecodeError`: If the JSON file is invalid.
@@ -153,7 +158,8 @@ class Spotdll():
         """Execute the download of an album, playlist, song etc.
 
         Args:
-            album (str): The name of the album being downloaded. A dir of this name is created in the CWD and the songs are downloaded into it.
+            album (str): The name of the album being downloaded. A dir of this 
+                         name is created in the CWD and the songs are downloaded into it.
             url (str): The spotify URL of the album, playlist, song etc.
         """
         from subprocess import run
