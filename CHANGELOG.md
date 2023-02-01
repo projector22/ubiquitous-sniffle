@@ -1,6 +1,10 @@
 # Ubiquitous Sniffle
 
-## c0.2.2 - 2023-02-01
+## v0.2.2 - 2023-02-01
+
+## Added
+
+- Added a nano edit on creating the json
 
 ### Fixed
 

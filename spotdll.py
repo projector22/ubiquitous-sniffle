@@ -3,6 +3,7 @@
 import argparse
 import json
 from os.path import expanduser, exists, makedirs, dirname
+import subprocess
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--create-json", required=False, action="store_true", help="Rather than download albums, generate a spotdll.json file")
@@ -113,6 +114,7 @@ class Spotdll():
             self.exit("JSON file " + self.json_path + " already exists, cancelling creation.")
         from shutil import copy
         copy(self.sample_json, self.json_path)
+        subprocess.run(['nano', self.json_path])
         self.exit("JSON file " + self.json_path + " has been created.")
 
 
