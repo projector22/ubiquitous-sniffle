@@ -2,8 +2,11 @@
 
 import argparse
 import json
-from os.path import expanduser, exists, makedirs, dirname
-import subprocess
+from os import getcwd, remove, makedirs, mkdir
+from os.path import expanduser, exists, dirname
+from subprocess import run
+from shutil import copy
+from sys import exit
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--create-json", required=False, action="store_true", help="Rather than download albums, generate a spotdll.json file")
@@ -24,6 +27,7 @@ class Logger():
         """
         self.artist = artist
         self.data = data
+        self.file = None
         self.log_file = expanduser('~/.spotdll/log.json')
         self._create_log_if_not_exists()
 
@@ -68,8 +72,6 @@ class Spotdll():
         Args:
             args (dict): The arguments parsed to the script.
         """
-        from os import getcwd
-
         self.args = args
         self.delete_when_complete = False
 
@@ -88,21 +90,20 @@ class Spotdll():
         log = Logger(self.cwd.split('/')[-1], self.data)
         log.log()
 
-        if self.delete_when_complete == True:
-            from os import remove
+        if self.delete_when_complete is True:
             remove(self.json_path)
 
 
     def _handle_arguments(self) -> None:
         """Goes through parsed atguments and handle as needed.
         """
-        if self.args["create_json"] == True:
+        if self.args["create_json"] is True:
             self.generate_json_file()
 
-        if self.args["delete_json"] == True:
+        if self.args["delete_json"] is True:
             self.delete_when_complete = True
 
-        if self.args["set_json_path"] != None:
+        if self.args["set_json_path"] is not None:
             self.json_path = self.args["set_json_path"]
 
 
@@ -112,9 +113,8 @@ class Spotdll():
         """
         if exists(self.json_path):
             self.exit("JSON file " + self.json_path + " already exists, cancelling creation.")
-        from shutil import copy
         copy(self.sample_json, self.json_path)
-        subprocess.run(['nano', self.json_path])
+        run(['nano', self.json_path])
         self.exit("JSON file " + self.json_path + " has been created.")
 
 
@@ -127,8 +127,7 @@ class Spotdll():
         """
         if closing_message is not None:
             print(closing_message)
-        import sys
-        sys.exit()
+        exit()
 
 
     def read_validate_json(self) -> dict|list:
@@ -164,8 +163,6 @@ class Spotdll():
                          name is created in the CWD and the songs are downloaded into it.
             url (str): The spotify URL of the album, playlist, song etc.
         """
-        from subprocess import run
-        from os import mkdir
         print("\nDownloading album: " + album.upper() + "\n")
         wd = self.cwd + '/' + album
         mkdir(wd)
