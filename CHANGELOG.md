@@ -1,5 +1,13 @@
 # Ubiquitous Sniffle
 
+## v0.2.3 - 2023-02-01
+
+### Fixed
+
+- Fixed import for `makedirs`
+
+---
+
 ## v0.2.2 - 2023-02-01
 
 ### Added
