@@ -12,6 +12,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("-c", "--create-json", required=False, action="store_true", help="Rather than download albums, generate a spotdll.json file")
 ap.add_argument("-s", "--set-json-path", required=False, help="Define a seperate path for the JSON file.")
 ap.add_argument("-d", "--delete-json", required=False, action="store_true", help="Deletes the JSON file, after the process is complete.")
+ap.add_argument("url", nargs='?', help="URL for single item direct download")
 
 args = vars(ap.parse_args())
 
@@ -106,6 +107,10 @@ class Spotdll():
         if self.args["set_json_path"] is not None:
             self.json_path = self.args["set_json_path"]
 
+        if self.args['url'] is not None:
+            self.execute_direct_download(self.args['url'])
+            self.exit("Album " + self.args['url'] + " downloaded.")
+
 
     def generate_json_file(self) -> None:
         """Generate a JSON file in the CWD as required. Will not overwrite the
@@ -166,6 +171,19 @@ class Spotdll():
         print("\nDownloading album: " + album.upper() + "\n")
         wd = self.cwd + '/' + album
         mkdir(wd)
+        execute_direct_download(url, wd)
         run(['spotdl', 'download', url], cwd=wd)
+
+    def execute_direct_download(self, url: str, directory: str = None) -> None:
+        """Executes a direct command to download an album from a parsed URL
+
+        Args:
+            url (str): The URL to download from.
+            directory (str, optional): what directory to execute the command in.
+        """
+        if directory is not None:
+            run(['spotdl', 'download', url], cwd=directory)
+        else:
+            run(['spotdl', 'download', url])
 
 spotdll = Spotdll(args)
