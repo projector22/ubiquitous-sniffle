@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 
+# Set your own NTFY Push url here. Set to False to disable.
+PUSH_URL='https://push.palmtree.net.za/tools'
+
 import argparse
 import json
 from os import getcwd, remove, makedirs, mkdir
@@ -31,6 +34,8 @@ class Logger():
         self.file = None
         self.log_file = expanduser('~/.spotdll/log.json')
         self._create_log_if_not_exists()
+
+        self.push_url = PUSH_URL
 
 
     def _create_log_if_not_exists(self) -> None:
@@ -64,6 +69,24 @@ class Logger():
         json.dump(existing_log, self.file, indent=2)
         self._close()
 
+    def push(self, body: str, title: str = None, tags: str = None, priority: str = None, click: str = None) -> None:
+        if self.push_url is False:
+            return
+
+        import requests
+
+        headers = {}
+        if (title is not None):
+            headers["Title"] = title
+        if (tags is not None):
+            headers["Tags"] = tags
+        if (priority is not None):
+            headers["Priority"] = priority
+        if (click is not None):
+            headers["Criority"] = click
+
+        requests.post(self.push_url, data=body.encode(encoding='utf-8'), headers=headers)
+
 class Spotdll():
     """Perform a batch spotdl task.
     """
@@ -87,9 +110,14 @@ class Spotdll():
 
         for album, url in self.data.items():
             self.execute_download(album, url)
-
         log = Logger(self.cwd.split('/')[-1], self.data)
         log.log()
+        if self.args["create_json"] is not True:
+            log.push(
+                "Download task complete🎵 📻\nTotal items downloaded: " + str(len(self.data)),
+                title="Spotdll Batch Finished",
+                tags='headphones,spotdll,spotdll-batch',
+            )
 
         if self.delete_when_complete is True:
             remove(self.json_path)
@@ -109,6 +137,13 @@ class Spotdll():
 
         if self.args['url'] is not None:
             self.execute_direct_download(self.args['url'])
+            log = Logger('', {})
+            log.push(
+                "Download complete 🎵 📻\n\n" + self.args['url'], 
+                title='Spotdll Finished',
+                click=self.args['url'],
+                tags='headphones,spotdll',
+            )
             self.exit("Album " + self.args['url'] + " downloaded.")
 
 
@@ -159,7 +194,6 @@ class Spotdll():
         finally:
             file.close()
 
-
     def execute_download(self, album: str, url: str) -> None:
         """Execute the download of an album, playlist, song etc.
 
@@ -171,8 +205,7 @@ class Spotdll():
         print("\nDownloading album: " + album.upper() + "\n")
         wd = self.cwd + '/' + album
         mkdir(wd)
-        execute_direct_download(url, wd)
-        run(['spotdl', 'download', url], cwd=wd)
+        self.execute_direct_download(url, wd)
 
     def execute_direct_download(self, url: str, directory: str = None) -> None:
         """Executes a direct command to download an album from a parsed URL
