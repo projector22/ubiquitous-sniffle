@@ -65,7 +65,7 @@ class Logger():
             existing_log[self.artist] = {}
         for album, url in self.data.items():
             existing_log[self.artist][album] = url
-        self.file = open(self.log_file, 'a')
+        self.file = open(self.log_file, 'w')
         json.dump(existing_log, self.file, indent=2)
         self._close()
 
@@ -137,7 +137,12 @@ class Spotdll():
 
         if self.args['url'] is not None:
             self.execute_direct_download(self.args['url'])
-            log = Logger('', {})
+
+            path = self.cwd.split('/')
+            artist = path[-2] or "Unknown Artist"
+            album = path[-1]
+
+            log = Logger(artist, {album: self.args['url']})
             log.push(
                 "Download complete 🎵 📻\n\n" + self.args['url'], 
                 title='Spotdll Finished',
@@ -215,8 +220,10 @@ class Spotdll():
             directory (str, optional): what directory to execute the command in.
         """
         if directory is not None:
-            run(['spotdl', 'download', url], cwd=directory)
+            pass
+            # run(['spotdl', 'download', url], cwd=directory)
         else:
-            run(['spotdl', 'download', url])
+            pass
+            # run(['spotdl', 'download', url])
 
 spotdll = Spotdll(args)

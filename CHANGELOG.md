@@ -13,6 +13,7 @@
 ### Fixed
 
 - Fixed a crash when the directory exists when going through a json object.
+- Fixed log writing.
 
 ## v0.2.3 - 2023-02-01
 
