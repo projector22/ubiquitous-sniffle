@@ -1,5 +1,15 @@
 # Ubiquitous Sniffle
 
+## v0.2.4 - 2024-06-03
+
+### Added
+
+- NTFY push notifications.
+
+### Fixed
+
+- Fixed a crash when the directory exists when going through a json object.
+
 ## v0.2.3 - 2023-02-01
 
 ### Fixed

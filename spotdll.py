@@ -204,7 +204,8 @@ class Spotdll():
         """
         print("\nDownloading album: " + album.upper() + "\n")
         wd = self.cwd + '/' + album
-        mkdir(wd)
+        if (not exists(wd)):
+            mkdir(wd)
         self.execute_direct_download(url, wd)
 
     def execute_direct_download(self, url: str, directory: str = None) -> None:
