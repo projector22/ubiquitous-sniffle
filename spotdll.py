@@ -44,9 +44,10 @@ class Logger():
         directory = dirname(self.log_file)
         if not exists(directory):
             makedirs(directory)
-        self.file = open(self.log_file, 'w')
-        json.dump({}, self.file)
-        self._close()
+        if not exists(self.log_file):
+            self.file = open(self.log_file, 'w')
+            json.dump({}, self.file)
+            self._close()
 
 
     def _close(self) -> None:
@@ -143,13 +144,14 @@ class Spotdll():
             album = path[-1]
 
             log = Logger(artist, {album: self.args['url']})
+            log.log()
             log.push(
                 "Download complete 🎵 📻\n\n" + self.args['url'], 
                 title='Spotdll Finished',
                 click=self.args['url'],
                 tags='headphones,spotdll',
             )
-            self.exit("Album " + self.args['url'] + " downloaded.")
+            self.exit("Album " + album + " downloaded.")
 
 
     def generate_json_file(self) -> None:
@@ -221,9 +223,9 @@ class Spotdll():
         """
         if directory is not None:
             pass
-            # run(['spotdl', 'download', url], cwd=directory)
+            run(['spotdl', 'download', url], cwd=directory)
         else:
             pass
-            # run(['spotdl', 'download', url])
+            run(['spotdl', 'download', url])
 
 spotdll = Spotdll(args)
