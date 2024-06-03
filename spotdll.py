@@ -151,9 +151,8 @@ class Spotdll():
         """Generate a JSON file in the CWD as required. Will not overwrite the
         file if it already exists
         """
-        if exists(self.json_path):
-            self.exit("JSON file " + self.json_path + " already exists, cancelling creation.")
-        copy(self.sample_json, self.json_path)
+        if not exists(self.json_path):
+            copy(self.sample_json, self.json_path)
         run(['nano', self.json_path])
         self.exit("JSON file " + self.json_path + " has been created.")
 

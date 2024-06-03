@@ -6,6 +6,10 @@
 
 - NTFY push notifications.
 
+### Changed
+
+- Changed how the -c switch works. It now allows editing of the file if it already exists.
+
 ### Fixed
 
 - Fixed a crash when the directory exists when going through a json object.
