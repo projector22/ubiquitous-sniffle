@@ -9,7 +9,7 @@ from os import getcwd, remove, makedirs, mkdir
 from os.path import expanduser, exists, dirname
 import shutil
 from subprocess import run
-from shutil import copy
+from shutil import copy, which
 from sys import exit
 
 ap = argparse.ArgumentParser()
@@ -39,7 +39,7 @@ class Logger():
         self.push_url = PUSH_URL
 
 
-    def _create_log_if_not_exists(self) -> N:one:
+    def _create_log_if_not_exists(self) -> None:
         """Create the log file if it doesn't exist.
         """
         directory = dirname(self.log_file)
@@ -162,7 +162,7 @@ class Spotdll():
         if not exists(self.json_path):
             copy(self.sample_json, self.json_path)
 
-        editor = 'nvim' if shutil.which('nvim') else 'nano'
+        editor = 'nvim' if which('nvim') else 'nano'
 
         run([editor, self.json_path])
 
