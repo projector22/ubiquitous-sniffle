@@ -112,14 +112,14 @@ class Spotdll():
 
         for album, url in self.data.items():
             self.execute_download(album, url)
-        log = Logger(self.cwd.split('/')[-1], self.data)
-        log.log()
-        if self.args["create_json"] is not True:
-            log.push(
-                "Download task complete🎵 📻\nTotal items downloaded: " + str(len(self.data)),
-                title="Spotdll Batch Finished",
-                tags='headphones,spotdll,spotdll-batch',
-            )
+        # log = Logger(self.cwd.split('/')[-1], self.data)
+        # log.log()
+        # if self.args["create_json"] is not True:
+        #     log.push(
+        #         "Download task complete🎵 📻\nTotal items downloaded: " + str(len(self.data)),
+        #         title="Spotdll Batch Finished",
+        #         tags='headphones,spotdll,spotdll-batch',
+        #     )
 
         if self.delete_when_complete is True:
             remove(self.json_path)
