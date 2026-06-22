@@ -141,17 +141,17 @@ class Spotdll():
             self.execute_direct_download(self.args['url'])
 
             path = self.cwd.split('/')
-            artist = path[-2] or "Unknown Artist"
+            # artist = path[-2] or "Unknown Artist"
             album = path[-1]
 
-            log = Logger(artist, {album: self.args['url']})
-            log.log()
-            log.push(
-                "Download complete 🎵 📻\n\n" + self.args['url'], 
-                title='Spotdll Finished',
-                click=self.args['url'],
-                tags='headphones,spotdll',
-            )
+            # log = Logger(artist, {album: self.args['url']})
+            # log.log()
+            # log.push(
+            #     "Download complete 🎵 📻\n\n" + self.args['url'], 
+            #     title='Spotdll Finished',
+            #     click=self.args['url'],
+            #     tags='headphones,spotdll',
+            # )
             self.exit("Album " + album + " downloaded.")
 
 
