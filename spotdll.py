@@ -228,9 +228,9 @@ class Spotdll():
         """
         if directory is not None:
             pass
-            run(['spotdl', 'download', url], cwd=directory)
+            run(['spotdl', '--bitrate', '128k', 'download', url], cwd=directory)
         else:
             pass
-            run(['spotdl', 'download', url])
+            run(['spotdl', '--bitrate', '128k', 'download', url])
 
 spotdll = Spotdll(args)
