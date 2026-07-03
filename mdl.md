@@ -18,6 +18,8 @@ All events should ultimately be recorded in a master json file.
 
 It would also be good some defaults can be set in a .config file and it should automatically check if all requirements are installed - giving clear instructions for install.
 
+One further idea is to place the source in a `.source` file in the directory which is created. This file will have the original generating url, and if the command is run on a directory without a `mdl.json` file or url, it will also look for the this `.source` file and execute on it.
+
 ## JSON Examples
 
 ```json
