@@ -52,6 +52,14 @@ func merge(a, b *Values) *Values {
 	return out
 }
 
+// longAliases lets an option be spelled with an extra long name. The old
+// tool-based names keep working: --spotdl means --spotify, --yt-dlp means
+// --youtube. Values are always recorded under the canonical name.
+var longAliases = map[string]string{
+	"spotdl": "spotify",
+	"yt-dlp": "youtube",
+}
+
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
@@ -91,6 +99,11 @@ func parse(specs []Opt, args []string, stopAtPositional bool) (*Values, []string
 
 		case strings.HasPrefix(a, "--"):
 			name, val, hasVal := strings.Cut(a[2:], "=")
+			if canon, isAlias := longAliases[name]; isAlias {
+				if _, exists := byLong[canon]; exists {
+					name = canon
+				}
+			}
 			opt, ok := byLong[name]
 			if !ok {
 				return nil, nil, usagef("unknown option --%s", name)

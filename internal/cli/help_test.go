@@ -97,3 +97,19 @@ func TestOptionsAreConsistent(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpMentionsAliasesAndBareURLUsage(t *testing.T) {
+	a := &App{}
+	top := a.topHelp()
+	for _, want := range []string{"mdl [OPTIONS] URL...", "--youtube", "--spotify"} {
+		if !strings.Contains(top, want) {
+			t.Errorf("top help missing %q", want)
+		}
+	}
+	dl := a.commandHelp(a.find("download"))
+	for _, want := range []string{"--spotify", "Also accepted as --spotdl.", "--youtube", "Also accepted as --yt-dlp.", "plain `mdl URL`"} {
+		if !strings.Contains(strings.Join(strings.Fields(dl), " "), want) {
+			t.Errorf("download help missing %q:\n%s", want, dl)
+		}
+	}
+}

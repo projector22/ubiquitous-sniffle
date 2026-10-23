@@ -48,7 +48,13 @@ func formatOpts(opts []Opt) string {
 	col := indent + maxLen + gap
 	var b strings.Builder
 	for i, o := range opts {
-		lines := wrapWords(o.Desc, helpWidth-col)
+		desc := o.Desc
+		for alias, canon := range longAliases {
+			if canon == o.Long {
+				desc += " Also accepted as --" + alias + "."
+			}
+		}
+		lines := wrapWords(desc, helpWidth-col)
 		if len(lines) == 0 {
 			lines = []string{""}
 		}
@@ -68,7 +74,8 @@ func paragraph(text string) string {
 func (a *App) topHelp() string {
 	var b strings.Builder
 	b.WriteString("mdl - download, organise and browse a personal music library\n\n")
-	b.WriteString("USAGE\n  mdl [GLOBAL OPTIONS] <command> [OPTIONS] [ARGUMENTS]\n  mdl <command> --help\n\n")
+	b.WriteString("USAGE\n  mdl [OPTIONS] URL...                          download URLs into the current directory\n" +
+		"  mdl [GLOBAL OPTIONS] <command> [OPTIONS] [ARGUMENTS]\n  mdl <command> --help\n\n")
 	b.WriteString("DESCRIPTION\n")
 	b.WriteString(paragraph("mdl keeps one library file that maps artist -> album -> Spotify / YouTube link, " +
 		"downloads those albums with spotdl or yt-dlp into <music-dir>/<Artist>/<Album>/, " +
@@ -104,11 +111,14 @@ func (a *App) topHelp() string {
 	b.WriteString("\nFILES AND ENVIRONMENT\n")
 	b.WriteString(formatEnv())
 	b.WriteString("\nEXAMPLES\n")
-	b.WriteString(`  mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
+	b.WriteString(`  mdl https://open.spotify.com/album/...     download straight into the current directory
+  mdl -b https://music.youtube.com/playlist?list=...   ...then run beet on it
+  mdl --youtube https://example.com/...      force yt-dlp (or --spotify to force spotdl)
+  mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
   mdl list
   mdl tui                                   browse; press d to download the selection
   mdl download                              download every album in the library
-  mdl download -a "Daft Punk" -sb           one artist, force spotdl, then run beet
+  mdl download -a "Daft Punk" -sb           one artist, force Spotify links, then run beet
   mdl download https://music.youtube.com/playlist?list=...
   mdl beet ~/Music/Daft\ Punk               run beet on a folder
   mdl install                               install beet, yt-dlp and spotdl

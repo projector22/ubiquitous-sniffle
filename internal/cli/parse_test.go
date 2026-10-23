@@ -107,3 +107,20 @@ func TestValuesAccessors(t *testing.T) {
 		t.Error("merge must not mutate its inputs")
 	}
 }
+
+func TestLongAliases(t *testing.T) {
+	specs := []Opt{{'s', "spotify", "", "x"}, {'y', "youtube", "", "y"}}
+	for _, arg := range []string{"--spotify", "--spotdl", "-s"} {
+		v, _, err := parse(specs, []string{arg}, false)
+		if err != nil || !v.Bool("spotify") || v.Has("spotdl") {
+			t.Errorf("%s: %v %v", arg, v, err)
+		}
+	}
+	if v, _, err := parse(specs, []string{"--yt-dlp"}, false); err != nil || !v.Bool("youtube") {
+		t.Errorf("--yt-dlp alias: %v", err)
+	}
+	// An alias is only valid where its canonical option exists.
+	if _, _, err := parse([]Opt{{'a', "artist", "NAME", "x"}}, []string{"--spotdl"}, false); err == nil {
+		t.Error("--spotdl should be unknown without --spotify")
+	}
+}

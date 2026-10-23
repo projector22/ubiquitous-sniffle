@@ -25,14 +25,29 @@ Prebuilt archives for Linux, macOS and Windows are attached to each
 
 ## Usage
 
+The simplest use: give it a link and it downloads into the current directory.
+
+```sh
+mdl https://open.spotify.com/album/...            # spotdl, into the current directory
+mdl https://music.youtube.com/playlist?list=...   # yt-dlp, into the current directory
+mdl -b https://open.spotify.com/album/...         # ...then run beet on it
+mdl --youtube URL                                 # force yt-dlp (or --spotify to force spotdl)
+```
+
+`mdl URL...` is shorthand for `mdl download URL...`. The tool is picked from the link (Spotify → spotdl,
+YouTube → yt-dlp); `-s`/`--spotify` and `-y`/`--youtube` override that. The older names `--spotdl` and
+`--yt-dlp` still work. Use `-m DIR` to download somewhere else.
+
+For a managed library:
+
 ```sh
 mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
 mdl add -a "Daft Punk" -A Discovery -u https://music.youtube.com/playlist?list=...   # adds the YouTube link too
 mdl list -u                       # tree of everything (-u also prints links)
 mdl tui                           # browse; press d to download the selection
 mdl download                      # every album in the library
-mdl download -a "Daft Punk" -sb   # one artist, force spotdl, then run beet on each folder
-mdl download https://open.spotify.com/album/...   # ad-hoc URL into the music dir
+mdl download -a "Daft Punk" -sb   # one artist, force Spotify links, then run beet on each folder
+mdl download --youtube            # use each album's YouTube link instead
 mdl beet ~/Music/Daft\ Punk       # run beet on a folder (default: current directory)
 mdl edit                          # open the library in $EDITOR
 mdl -n download                   # dry run: show the commands, change nothing
@@ -71,11 +86,11 @@ One JSON file, sorted and indented so it is easy to read, diff and edit by hand:
 }
 ```
 
-Each album needs at least one link. When it has both, Spotify is used unless you pass `--yt-dlp`.
+Each album needs at least one link. When it has both, Spotify is used unless you pass `--youtube`; with `--spotify` or `--youtube`, albums lacking that link are reported as failures and the rest continue.
 Unknown keys are rejected, so a typo like `"youtbe"` is reported instead of ignored.
 
 Location: `-L FILE`, else `$MDL_LIBRARY`, else `~/.config/mdl/library.json`.
-Music directory: `-m DIR`, else `$MDL_MUSIC_DIR`, else the current directory.
+Music directory for the `Artist/Album` layout: `-m DIR`, else `$MDL_MUSIC_DIR`, else the current directory. Plain URL downloads ignore `$MDL_MUSIC_DIR` and use the current directory unless `-m` is given.
 
 ### TUI
 
@@ -106,8 +121,9 @@ mdl import path/to/multi-artist.json                     # {"Artist": {"Album": 
 | --- | --- |
 | `script.sh -c` / `-d` (edit JSON) | `mdl edit`, `mdl add`, `mdl tui` |
 | `script.sh -b` | `mdl beet` |
-| `script.sh -s URL`, `-y URL` | `mdl download -s URL`, `mdl download -y URL` |
-| `script.sh -b URL` | `mdl download -b URL` |
+| `script.sh URL` | `mdl URL` |
+| `script.sh -s URL`, `-y URL` | `mdl -s URL`, `mdl -y URL` |
+| `script.sh -b URL` | `mdl -b URL` |
 | `.source` file | removed: use `mdl download URL...` (or a shell alias) |
 
 ## Development

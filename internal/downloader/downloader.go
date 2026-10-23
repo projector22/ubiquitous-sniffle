@@ -70,12 +70,12 @@ func SelectSource(e library.Entry, forced Tool) (Tool, string, error) {
 	switch forced {
 	case Spotdl:
 		if e.Spotify == "" {
-			return Auto, "", errors.New("no Spotify link (remove --spotdl or add one)")
+			return Auto, "", errors.New("no Spotify link (remove --spotify or add one)")
 		}
 		return Spotdl, e.Spotify, nil
 	case YtDlp:
 		if e.YouTube == "" {
-			return Auto, "", errors.New("no YouTube link (remove --yt-dlp or add one)")
+			return Auto, "", errors.New("no YouTube link (remove --youtube or add one)")
 		}
 		return YtDlp, e.YouTube, nil
 	}

@@ -68,8 +68,8 @@ var globalOpts = []Opt{
 
 // Options shared by the commands that download.
 var downloadOpts = []Opt{
-	{'s', "spotdl", "", "Force spotdl. Albums without a Spotify link are reported as failures."},
-	{'y', "yt-dlp", "", "Force yt-dlp. Albums without a YouTube link are reported as failures. Cannot be combined with --spotdl."},
+	{'s', "spotify", "", "Force Spotify (spotdl). Library albums use their Spotify link and fail if they have none; URLs are handed to spotdl whatever their host."},
+	{'y', "youtube", "", "Force YouTube (yt-dlp). Library albums use their YouTube link and fail if they have none; URLs are handed to yt-dlp whatever their host. Cannot be combined with --spotify."},
 	{'b', "beet", "", "After downloading, run `beet import -C` on each downloaded folder so beets can tag and organise it."},
 }
 
@@ -106,10 +106,11 @@ func (a *App) commands() []command {
 		{
 			Name: "download", Aliases: []string{"dl", "get"}, Args: "[URL...]",
 			Summary: "Download albums from the library, or the given URLs",
-			Long: "With no URLs, downloads albums from the library into <music-dir>/<Artist>/<Album>/. " +
-				"Use --artist and/or --album to download a subset. Spotify links are preferred when an album has both; " +
-				"force a tool with --spotdl or --yt-dlp. With URLs, each one is downloaded straight into the music directory " +
-				"using spotdl for Spotify links and yt-dlp for YouTube links. A failed album does not stop the rest.",
+			Long: "With URLs, downloads each one straight into the current directory (or --music-dir): spotdl for Spotify " +
+				"links, yt-dlp for YouTube links. This is also what plain `mdl URL` does, so `download` can be left out. " +
+				"With no URLs, downloads albums from the library into <music-dir>/<Artist>/<Album>/; use --artist and/or " +
+				"--album to download a subset. Spotify links are preferred when an album has both; force a service with " +
+				"--spotify or --youtube. A failed album does not stop the rest.",
 			Opts: append(append([]Opt{}, downloadOpts...),
 				Opt{'a', "artist", "NAME", "Only download this artist's albums (case-insensitive). Library downloads only."},
 				Opt{'A', "album", "NAME", "Only download albums with this name (case-insensitive). Library downloads only."}),
@@ -117,6 +118,7 @@ func (a *App) commands() []command {
 				"mdl download",
 				`mdl download -a "Daft Punk" -A Discovery`,
 				"mdl download -yb https://music.youtube.com/playlist?list=...",
+				"mdl https://open.spotify.com/album/...",
 			},
 			run: a.cmdDownload,
 		},
@@ -238,6 +240,11 @@ func (a *App) fail(format string, args ...any) int {
 // Run executes mdl with args (excluding the program name) and returns the
 // process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
+	// `mdl [download options] URL...` is shorthand for `mdl download ...`.
+	if dl := a.implicitDownload(args); dl != nil {
+		return a.runCommand(ctx, dl, newValues(), args)
+	}
+
 	globals, rest, err := parse(globalOpts, args, true)
 	if err != nil {
 		return a.usageErr(err)
@@ -250,13 +257,38 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		fmt.Fprint(a.Stdout, a.topHelp())
 		return exitOK
 	}
-
 	cmd := a.find(rest[0])
 	if cmd == nil {
 		return a.usageErr(fmt.Errorf("unknown command %q", rest[0]))
 	}
+	return a.runCommand(ctx, cmd, globals, rest[1:])
+}
+
+// isURL reports whether s looks like a web link rather than a command name.
+func isURL(s string) bool {
+	l := strings.ToLower(s)
+	return strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")
+}
+
+// implicitDownload returns the download command when args look like
+// `[options] URL...`: the first argument that is not an option is a URL
+// rather than a command name. Download options such as -s or --youtube are
+// accepted before the URL.
+func (a *App) implicitDownload(args []string) *command {
+	dl := a.find("download")
+	specs := append(append([]Opt{}, dl.Opts...), globalOpts...)
+	_, rest, err := parse(specs, args, true)
+	if err != nil || len(rest) == 0 || a.find(rest[0]) != nil || !isURL(rest[0]) {
+		return nil
+	}
+	return dl
+}
+
+// runCommand parses cmd's own options from args, merges them with the global
+// options already parsed, and runs it.
+func (a *App) runCommand(ctx context.Context, cmd *command, globals *Values, args []string) int {
 	specs := append(append([]Opt{}, cmd.Opts...), globalOpts...)
-	vals, pos, err := parse(specs, rest[1:], false)
+	vals, pos, err := parse(specs, args, false)
 	if err != nil {
 		return a.usageErr(fmt.Errorf("%s: %w", cmd.Name, err))
 	}
@@ -312,9 +344,9 @@ func (a *App) loadLibrary(inv *invocation) (*library.Library, int) {
 }
 
 func forcedTool(v *Values) (downloader.Tool, error) {
-	switch s, y := v.Bool("spotdl"), v.Bool("yt-dlp"); {
+	switch s, y := v.Bool("spotify"), v.Bool("youtube"); {
 	case s && y:
-		return downloader.Auto, usagef("--spotdl and --yt-dlp cannot be used together")
+		return downloader.Auto, usagef("--spotify and --youtube cannot be used together")
 	case s:
 		return downloader.Spotdl, nil
 	case y:
@@ -348,7 +380,13 @@ func (a *App) cmdDownload(inv *invocation) int {
 		if inv.vals.Has("artist") || inv.vals.Has("album") {
 			return a.usageErr(errors.New("--artist and --album only apply to library downloads, not to URLs"))
 		}
-		dl := a.newDownloader(inv)
+		// Ad-hoc URLs land in the current directory unless -m says otherwise
+		// ($MDL_MUSIC_DIR only applies to the Artist/Album library layout).
+		root := inv.vals.String("music-dir")
+		if root == "" {
+			root = "."
+		}
+		dl := a.newDownloader(inv, root)
 		failed, ok := false, false
 		for _, u := range inv.args {
 			if err := dl.DownloadURL(inv.ctx, u, forced); err != nil {
@@ -360,7 +398,7 @@ func (a *App) cmdDownload(inv *invocation) int {
 		}
 		var dirs []string
 		if ok {
-			dirs = []string{inv.musicDir}
+			dirs = []string{root}
 		}
 		return a.finish(inv, dirs, failed)
 	}
@@ -376,12 +414,12 @@ func (a *App) cmdDownload(inv *invocation) int {
 	return a.runJobs(inv, jobs, forced)
 }
 
-func (a *App) newDownloader(inv *invocation) *downloader.Downloader {
-	return &downloader.Downloader{Runner: a.runnerFor(inv), Root: inv.musicDir, Out: a.Stdout, DryRun: inv.dry}
+func (a *App) newDownloader(inv *invocation, root string) *downloader.Downloader {
+	return &downloader.Downloader{Runner: a.runnerFor(inv), Root: root, Out: a.Stdout, DryRun: inv.dry}
 }
 
 func (a *App) runJobs(inv *invocation, jobs []downloader.Job, forced downloader.Tool) int {
-	results := a.newDownloader(inv).DownloadJobs(inv.ctx, jobs, forced)
+	results := a.newDownloader(inv, inv.musicDir).DownloadJobs(inv.ctx, jobs, forced)
 	var dirs []string
 	failed := len(results) < len(jobs) // stopped early by cancellation
 	for _, r := range results {

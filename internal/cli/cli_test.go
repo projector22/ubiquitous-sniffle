@@ -296,8 +296,16 @@ func TestDownloadURLs(t *testing.T) {
 	if strings.Join(got, ",") != "spotdl,yt-dlp,beet" {
 		t.Errorf("calls = %v", got)
 	}
-	if h.fake.Calls[0].Dir != h.musicDir || h.fake.Calls[2].Args[2] != h.musicDir {
-		t.Errorf("URLs should download into the music dir: %+v", h.fake.Calls)
+	// MDL_MUSIC_DIR is set in the harness but must not redirect ad-hoc URLs:
+	// they go to the current directory.
+	if h.fake.Calls[0].Dir != "." || h.fake.Calls[2].Args[2] != "." {
+		t.Errorf("URLs should download into the current directory: %+v", h.fake.Calls)
+	}
+	// An explicit -m wins.
+	custom := filepath.Join(h.dir, "elsewhere")
+	h.expect(t, 0, "download", "-m", custom, "https://open.spotify.com/album/a")
+	if h.fake.Calls[0].Dir != custom {
+		t.Errorf("-m should apply to URLs: %+v", h.fake.Calls[0])
 	}
 	h.fake.Err = func(runner.Call) error { return errors.New("fail") }
 	h.expect(t, 1, "download", "-b", "https://open.spotify.com/album/a")
@@ -562,5 +570,89 @@ func TestNewApp(t *testing.T) {
 	a := NewApp("v1")
 	if a.Version != "v1" || a.Runner == nil || a.LookPath == nil || a.TUI == nil || a.Getenv == nil {
 		t.Errorf("NewApp not fully wired: %+v", a)
+	}
+}
+
+func TestBareURLDownloadsToCurrentDirectory(t *testing.T) {
+	h := newHarness(t)
+	h.expect(t, 0, "https://open.spotify.com/album/a")
+	if len(h.fake.Calls) != 1 {
+		t.Fatalf("calls = %+v", h.fake.Calls)
+	}
+	c := h.fake.Calls[0]
+	if c.Name != "spotdl" || c.Dir != "." || c.Args[len(c.Args)-1] != "https://open.spotify.com/album/a" {
+		t.Errorf("call = %+v", c)
+	}
+	// YouTube links pick yt-dlp; several URLs work; no library is needed.
+	h.expect(t, 0, "https://music.youtube.com/playlist?list=x", "HTTP://OPEN.SPOTIFY.COM/album/b")
+	if len(h.fake.Calls) != 2 || h.fake.Calls[0].Name != "yt-dlp" || h.fake.Calls[1].Name != "spotdl" {
+		t.Errorf("calls = %+v", h.fake.Calls)
+	}
+	if _, err := os.Stat(h.libPath); err == nil {
+		t.Error("a bare URL must not require or create the library")
+	}
+}
+
+func TestBareURLWithOptions(t *testing.T) {
+	h := newHarness(t)
+	const spot = "https://open.spotify.com/album/a"
+	for _, args := range [][]string{{"-b", spot}, {spot, "-b"}, {"--beet", spot}} {
+		h.expect(t, 0, args...)
+		if n := len(h.fake.Calls); n != 2 || h.fake.Calls[0].Name != "spotdl" || h.fake.Calls[1].Name != "beet" {
+			t.Errorf("mdl %v: want download then beet, calls = %+v", args, h.fake.Calls)
+		}
+	}
+	h.expect(t, 0, "-n", "-b", spot) // dry run prints both commands, runs nothing
+	if len(h.fake.Calls) != 0 || !strings.Contains(h.out.String(), "spotdl") || !strings.Contains(h.out.String(), "+ beet import -C .") {
+		t.Errorf("dry run output:\n%s", h.out)
+	}
+	// Forcing: --youtube / --spotify (and the older --yt-dlp / --spotdl names).
+	for flag, tool := range map[string]string{
+		"--youtube": "yt-dlp", "-y": "yt-dlp", "--yt-dlp": "yt-dlp",
+		"--spotify": "spotdl", "-s": "spotdl", "--spotdl": "spotdl",
+	} {
+		h.expect(t, 0, flag, spot)
+		if h.fake.Calls[0].Name != tool {
+			t.Errorf("mdl %s URL used %s, want %s", flag, h.fake.Calls[0].Name, tool)
+		}
+	}
+	h.expect(t, 0, "-m", filepath.Join(h.dir, "out"), spot)
+	if h.fake.Calls[0].Dir != filepath.Join(h.dir, "out") {
+		t.Errorf("call = %+v", h.fake.Calls[0])
+	}
+	h.expect(t, 2, "-sy", spot)
+	h.expect(t, 2, "--spotify", "--youtube", spot)
+	h.expect(t, 2, "--spotdl", "--yt-dlp", spot) // aliases conflict too
+	h.expect(t, 2, "--nope", spot)
+	h.expect(t, 0, "-h", spot)
+	if !strings.HasPrefix(h.out.String(), "mdl download") {
+		t.Errorf("help for a bare URL should be the download help:\n%s", h.out)
+	}
+	h.expect(t, 2, "-a", "X", spot) // library filters make no sense with URLs
+}
+
+func TestBareArgumentsThatAreNotURLs(t *testing.T) {
+	h := newHarness(t)
+	h.expect(t, 2, "open.spotify.com/album/a") // no scheme: not treated as a URL
+	h.expect(t, 2, "-b", "nonsense")
+	// Real command names still win, even after download-only options.
+	h.expect(t, 2, "-s", "list") // -s is not a global option
+	h.expect(t, 0, "list", "--help")
+}
+
+func TestForceOptionsOnLibraryDownloads(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t)
+	h.expect(t, 0, "download", "--youtube", "-a", "Daft Punk", "-A", "Discovery")
+	if h.fake.Calls[0].Name != "yt-dlp" || !strings.Contains(strings.Join(h.fake.Calls[0].Args, " "), "playlist?list=b") {
+		t.Errorf("--youtube should use the YouTube link: %+v", h.fake.Calls[0])
+	}
+	h.expect(t, 0, "download", "--spotify", "-a", "Daft Punk", "-A", "Discovery")
+	if h.fake.Calls[0].Name != "spotdl" || !strings.Contains(strings.Join(h.fake.Calls[0].Args, " "), "album/a") {
+		t.Errorf("--spotify should use the Spotify link: %+v", h.fake.Calls[0])
+	}
+	h.expect(t, 1, "download", "--youtube", "-a", "AC/DC") // only a Spotify link
+	if !strings.Contains(h.err.String(), "--youtube") {
+		t.Errorf("error should name the option: %q", h.err)
 	}
 }
