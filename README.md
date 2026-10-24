@@ -257,8 +257,11 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 
 ## Features to build
 
-- [x] Generate an edit file with -c. Import with and without artist defined
+- [ ] Dependabot and CI.
 - [ ] Choose default editor, not just vi
-- [ ] Dependabot and CI
+- [x] Generate an edit file with -c. Import with and without artist defined
+  - [ ] The default behaviour for running mdl without arguments if a mdl.json is present, is to download on it.
+  - [ ] The flags to force Youtube or Spotify should be respected.
+  - [ ] otherwise mdl should use the correct tool depending on the url, and switch if urls are mixed
 - [ ] -m should use the targetted path for import data.
 - [ ] Import for old spotdll
