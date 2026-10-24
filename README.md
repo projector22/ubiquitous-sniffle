@@ -222,6 +222,6 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 
 ## Features to build
 
-1. Generate an edit file with -c. Import with and without artist defined
-2. choose default editor
-3. 
+- [ ] Generate an edit file with -c. Import with and without artist defined
+- [ ] Choose default editor, not just vi
+- [ ] Dependabot and CI
