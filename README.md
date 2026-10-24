@@ -12,7 +12,8 @@ It is a single static binary. The TUI is built with [Bubble Tea](https://github.
 ## Install
 
 ```sh
-make install              # builds and copies to /usr/local/bin (PREFIX=~/.local to change)
+make install              # builds and installs to ~/.local/bin/mdl (INSTALL_DIR=... to change)
+export PATH="$HOME/.local/bin:$PATH"   # if ~/.local/bin is not already on your PATH
 mdl install               # installs beet, yt-dlp and spotdl via pipx (or pip --user)
 mdl install --check       # see what is present
 ```
@@ -34,11 +35,59 @@ mdl -b https://open.spotify.com/album/...         # ...then run beet on it
 mdl --youtube URL                                 # force yt-dlp (or --spotify to force spotdl)
 ```
 
-`mdl URL...` is shorthand for `mdl download URL...`. The tool is picked from the link (Spotify → spotdl,
+Every URL that downloads successfully is also **recorded in your library file** (see below), so the library
+always reflects what you have fetched. `mdl URL...` is shorthand for `mdl download URL...`. The tool is picked from the link (Spotify → spotdl,
 YouTube → yt-dlp); `-s`/`--spotify` and `-y`/`--youtube` override that. The older names `--spotdl` and
 `--yt-dlp` still work. Use `-m DIR` to download somewhere else.
 
-For a managed library:
+### One-off albums straight into the library
+
+Add `-t` / `--to-library` to file a URL into the music library layout instead of the current directory:
+
+```sh
+mdl -t https://music.youtube.com/playlist?list=...     # <music-dir>/<Artist>/<Album>/01 - Track.mp3 ...
+mdl -tb https://open.spotify.com/album/...             # ...and run beet on just the new album folder(s)
+mdl -t -a "Daft Punk" -A Discovery https://youtu.be/...   # you already know who/what it is
+```
+
+The downloader names the folders from each track's own metadata, so a playlist or album lands under its
+artist and album. When the tracks carry no artist, the files go under `Unknown Artist`, and with no album
+under the playlist's title, or `Unknown Album` for a single video. `-a` / `-A` override either part. Track
+numbers are zero-padded for playlists and albums. The music directory is `-m DIR`, else `$MDL_MUSIC_DIR`,
+else the current directory.
+
+Notes: with `--beet`, only album folders that were created or changed by this download are imported, never
+your whole collection. Folder names that come from metadata are cleaned by yt-dlp / spotdl themselves, so a
+`/` in a name can differ slightly from the `_` that `mdl download` uses for library entries (for example
+`AC⧸DC` versus `AC_DC`); pass `-a` to get mdl's naming. spotdl always knows artist and album from Spotify, so
+`Unknown Artist` only happens with YouTube sources.
+
+### Every download is recorded
+
+After each successful URL download, mdl adds the link to the library file, whatever the downloader's
+metadata said. The entry is filed under:
+
+1. `-a ARTIST` / `-A ALBUM`, if you gave them;
+2. with `-t`, the `<Artist>/<Album>` folder the download actually filled (when it produced exactly one);
+3. otherwise **the directory you ran mdl in**: its name is the album and the name of the directory above it
+   is the artist.
+
+Each of artist and album is resolved separately, so `-A "Homework"` alone still takes the artist from the
+directory above. For example, in `~/Music/Daft Punk/Discovery`:
+
+```sh
+cd ~/Music/Daft\ Punk/Discovery
+mdl https://open.spotify.com/album/...        # recorded as Daft Punk / Discovery (spotify)
+mdl https://music.youtube.com/playlist?...    # same album, adds the youtube link
+mdl -N URL                                    # -N / --no-import: download only, record nothing
+```
+
+Details: only Spotify and YouTube links can be stored (anything else downloads with a warning); a URL that
+fails to download is not recorded; running it somewhere unrelated, like `~/Downloads`, will file the album
+under that folder's names, so pass `-a`/`-A` or `-N` there; if a different link for the same service is already
+stored, it is replaced and mdl says so. Recorded entries can be fixed later with `mdl edit`.
+
+### A managed library
 
 ```sh
 mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
@@ -124,6 +173,7 @@ mdl import path/to/multi-artist.json                     # {"Artist": {"Album": 
 | `script.sh URL` | `mdl URL` |
 | `script.sh -s URL`, `-y URL` | `mdl -s URL`, `mdl -y URL` |
 | `script.sh -b URL` | `mdl -b URL` |
+| (new) file a random URL under Artist/Album | `mdl -t URL` |
 | `.source` file | removed: use `mdl download URL...` (or a shell alias) |
 
 ## Development
@@ -169,3 +219,9 @@ The module is named `mdl`. To `go install` it from GitHub, rename it first:
 go mod edit -module github.com/YOU/mdl
 grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/#'
 ```
+
+## Features to build
+
+1. Generate an edit file with -c. Import with and without artist defined
+2. choose default editor
+3. 

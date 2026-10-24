@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mdl/internal/library"
 	"mdl/internal/runner"
@@ -281,5 +282,195 @@ func TestBeet(t *testing.T) {
 	c := f.Calls[0]
 	if c.Name != "beet" || strings.Join(c.Args, " ") != "import -C /m/A/B" {
 		t.Errorf("call = %+v", c)
+	}
+}
+
+func TestLibraryCommandYtDlp(t *testing.T) {
+	name, args := LibraryCommand(YtDlp, "https://music.youtube.com/playlist?list=x", "", "")
+	if name != "yt-dlp" || args[len(args)-1] != "https://music.youtube.com/playlist?list=x" {
+		t.Fatalf("%s %v", name, args)
+	}
+	tmpl := argAfter(t, args, "-o")
+	want := "%(album_artist,artist,creator|Unknown Artist)s/%(album,playlist_title|Unknown Album)s/%(playlist_index&{:02d} - |)s%(track,title)s.%(ext)s"
+	if tmpl != want {
+		t.Errorf("template = %q\nwant       %q", tmpl, want)
+	}
+	// Same audio options as a plain download.
+	joined := strings.Join(args, " ")
+	for _, w := range []string{"-x", "--audio-format mp3", "--embed-metadata", "--embed-thumbnail", "--js-runtimes node"} {
+		if !strings.Contains(joined, w) {
+			t.Errorf("missing %q in %s", w, joined)
+		}
+	}
+	// Explicit names replace the metadata fields and are sanitised / escaped.
+	_, args = LibraryCommand(YtDlp, "u", "AC/DC", "100% Rock: Live")
+	if got := argAfter(t, args, "-o"); !strings.HasPrefix(got, "AC_DC/100%% Rock_ Live/") {
+		t.Errorf("template = %q", got)
+	}
+	// Only one of the two given: the other still comes from metadata.
+	_, args = LibraryCommand(YtDlp, "u", "Daft Punk", "")
+	if got := argAfter(t, args, "-o"); !strings.HasPrefix(got, "Daft Punk/%(album,playlist_title|Unknown Album)s/") {
+		t.Errorf("template = %q", got)
+	}
+}
+
+func TestLibraryCommandSpotdl(t *testing.T) {
+	name, args := LibraryCommand(Spotdl, "https://open.spotify.com/album/a", "", "")
+	if name != "spotdl" || args[len(args)-2] != "download" || args[len(args)-1] != "https://open.spotify.com/album/a" {
+		t.Fatalf("%s %v", name, args)
+	}
+	if got, want := argAfter(t, args, "--output"), "{album-artist}/{album}/{track-number} - {title}.{output-ext}"; got != want {
+		t.Errorf("template = %q, want %q", got, want)
+	}
+	if argAfter(t, args, "--bitrate") != "128k" {
+		t.Error("bitrate lost")
+	}
+	_, args = LibraryCommand(Spotdl, "u", "AC/DC {x}", "Back: in Black")
+	if got := argAfter(t, args, "--output"); !strings.HasPrefix(got, "AC_DC (x)/Back_ in Black/{track-number}") {
+		t.Errorf("template = %q", got)
+	}
+}
+
+func argAfter(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	t.Fatalf("%s not found in %v", flag, args)
+	return ""
+}
+
+// fakeDownload returns a runner.Fake that behaves like a downloader: it
+// creates the given <artist>/<album> folders (with a file) below the cwd.
+func fakeDownload(paths ...[2]string) *runner.Fake {
+	return &runner.Fake{Err: func(c runner.Call) error {
+		for _, p := range paths {
+			dir := filepath.Join(c.Dir, p[0], p[1])
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(dir, "01 - track.mp3"), []byte("x"), 0o644); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+}
+
+func TestDownloadURLToLibraryReportsOnlyChangedAlbums(t *testing.T) {
+	root := t.TempDir()
+	// An existing, untouched album that must not be reported.
+	old := filepath.Join(root, "Old Artist", "Old Album")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-48 * time.Hour)
+	_ = os.Chtimes(old, past, past)
+
+	f := fakeDownload([2]string{"Daft Punk", "Discovery"}, [2]string{"Unknown Artist", "Unknown Album"})
+	var out bytes.Buffer
+	d := &Downloader{Runner: f, Root: root, Out: &out}
+	dirs, err := d.DownloadURLToLibrary(context.Background(), "https://music.youtube.com/playlist?list=x", Auto, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		filepath.Join(root, "Daft Punk", "Discovery"),
+		filepath.Join(root, "Unknown Artist", "Unknown Album"),
+	}
+	if strings.Join(dirs, "|") != strings.Join(want, "|") {
+		t.Errorf("dirs = %v, want %v", dirs, want)
+	}
+	if f.Calls[0].Dir != root || f.Calls[0].Name != "yt-dlp" {
+		t.Errorf("call = %+v", f.Calls[0])
+	}
+	if !strings.Contains(out.String(), "into the library") {
+		t.Errorf("output = %q", out.String())
+	}
+
+	// Adding files to an existing album counts as a change; others do not.
+	_ = os.Chtimes(filepath.Join(root, "Daft Punk", "Discovery"), past, past)
+	_ = os.Chtimes(filepath.Join(root, "Unknown Artist", "Unknown Album"), past, past)
+	d.Runner = &runner.Fake{Err: func(c runner.Call) error {
+		return os.WriteFile(filepath.Join(c.Dir, "Daft Punk", "Discovery", "02 - more.mp3"), nil, 0o644)
+	}}
+	dirs, err = d.DownloadURLToLibrary(context.Background(), "https://youtu.be/y", Auto, "", "")
+	if err != nil || len(dirs) != 1 || dirs[0] != filepath.Join(root, "Daft Punk", "Discovery") {
+		t.Errorf("dirs = %v, err = %v", dirs, err)
+	}
+}
+
+func TestDownloadURLToLibraryOptionsAndErrors(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "music")
+	f := fakeDownload([2]string{"Daft Punk", "Discovery"})
+	d := &Downloader{Runner: f, Root: root}
+	ctx := context.Background()
+
+	// Forced tool and explicit names reach the command line; Root is created.
+	if _, err := d.DownloadURLToLibrary(ctx, "https://open.spotify.com/album/a", YtDlp, "Daft Punk", "Discovery"); err != nil {
+		t.Fatal(err)
+	}
+	if f.Calls[0].Name != "yt-dlp" || !strings.HasPrefix(argAfter(t, f.Calls[0].Args, "-o"), "Daft Punk/Discovery/") {
+		t.Errorf("call = %+v", f.Calls[0])
+	}
+	// A failing download returns the error (callers skip beet then).
+	d.Runner = &runner.Fake{Err: func(runner.Call) error { return errors.New("boom") }}
+	if _, err := d.DownloadURLToLibrary(ctx, "https://open.spotify.com/album/a", Auto, "", ""); err == nil {
+		t.Error("expected the download error")
+	}
+	// Dry run creates nothing.
+	dry := filepath.Join(t.TempDir(), "never")
+	dd := &Downloader{Runner: &runner.Fake{}, Root: dry, DryRun: true}
+	if dirs, err := dd.DownloadURLToLibrary(ctx, "https://open.spotify.com/album/a", Auto, "", ""); err != nil || len(dirs) != 0 {
+		t.Errorf("dirs=%v err=%v", dirs, err)
+	}
+	if _, err := os.Stat(dry); !os.IsNotExist(err) {
+		t.Error("dry run must not create the root")
+	}
+	// Root that cannot be created.
+	blocker := filepath.Join(t.TempDir(), "f")
+	_ = os.WriteFile(blocker, nil, 0o644)
+	bad := &Downloader{Runner: &runner.Fake{}, Root: filepath.Join(blocker, "x")}
+	if _, err := bad.DownloadURLToLibrary(ctx, "https://open.spotify.com/album/a", Auto, "", ""); err == nil {
+		t.Error("expected mkdir error")
+	}
+}
+
+func TestSnapshotIgnoresFilesAndMissingRoot(t *testing.T) {
+	if got := snapshotAlbumDirs(filepath.Join(t.TempDir(), "nope")); len(got) != 0 {
+		t.Errorf("snapshot = %v", got)
+	}
+	root := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "stray.txt"), nil, 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "Artist"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "Artist", "loose.mp3"), nil, 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "Artist", "Album", "deeper"), 0o755)
+	got := snapshotAlbumDirs(root)
+	if len(got) != 1 {
+		t.Errorf("snapshot = %v, want only Artist/Album", got)
+	}
+}
+
+func TestNamesFromDir(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Daft Punk", "Discovery")
+	if artist, album := NamesFromDir(dir); artist != "Daft Punk" || album != "Discovery" {
+		t.Errorf("got %q / %q", artist, album)
+	}
+	// Relative paths resolve against the working directory.
+	wd, _ := os.Getwd()
+	if artist, album := NamesFromDir("."); artist != filepath.Base(filepath.Dir(wd)) || album != filepath.Base(wd) {
+		t.Errorf("'.' gave %q / %q", artist, album)
+	}
+	// A filesystem root has no usable names.
+	if artist, album := NamesFromDir(string(filepath.Separator)); artist != UnknownArtist || album != UnknownAlbum {
+		t.Errorf("root gave %q / %q", artist, album)
+	}
+	// A directory directly below the root has an album but no artist.
+	top := filepath.Join(string(filepath.Separator), "OnlyAlbum")
+	if artist, album := NamesFromDir(top); artist != UnknownArtist || album != "OnlyAlbum" {
+		t.Errorf("top-level dir gave %q / %q", artist, album)
 	}
 }

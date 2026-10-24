@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,7 +112,6 @@ func TestUsageErrors(t *testing.T) {
 		{"download", "-sy"},
 		{"download", "-s", "--yt-dlp"},
 		{"tui", "-sy"},
-		{"download", "-a", "X", "https://open.spotify.com/album/a"},
 		{"add"},
 		{"add", "-a", "X", "-A", "Y"},
 		{"add", "-a", "X", "-A", "Y", "-u", "https://u.example", "stray"},
@@ -588,8 +588,9 @@ func TestBareURLDownloadsToCurrentDirectory(t *testing.T) {
 	if len(h.fake.Calls) != 2 || h.fake.Calls[0].Name != "yt-dlp" || h.fake.Calls[1].Name != "spotdl" {
 		t.Errorf("calls = %+v", h.fake.Calls)
 	}
-	if _, err := os.Stat(h.libPath); err == nil {
-		t.Error("a bare URL must not require or create the library")
+	// A bare URL does not need an existing library; it creates one.
+	if _, err := os.Stat(h.libPath); err != nil {
+		t.Errorf("a bare URL should be recorded in a new library: %v", err)
 	}
 }
 
@@ -628,7 +629,6 @@ func TestBareURLWithOptions(t *testing.T) {
 	if !strings.HasPrefix(h.out.String(), "mdl download") {
 		t.Errorf("help for a bare URL should be the download help:\n%s", h.out)
 	}
-	h.expect(t, 2, "-a", "X", spot) // library filters make no sense with URLs
 }
 
 func TestBareArgumentsThatAreNotURLs(t *testing.T) {
@@ -654,5 +654,308 @@ func TestForceOptionsOnLibraryDownloads(t *testing.T) {
 	h.expect(t, 1, "download", "--youtube", "-a", "AC/DC") // only a Spotify link
 	if !strings.Contains(h.err.String(), "--youtube") {
 		t.Errorf("error should name the option: %q", h.err)
+	}
+}
+
+func TestToLibraryDownloadsFileUnderArtistAndAlbum(t *testing.T) {
+	h := newHarness(t)
+	// Behave like the real downloader: create <Artist>/<Album> below the cwd.
+	n := 0
+	h.fake.Err = func(c runner.Call) error {
+		dir := filepath.Join(c.Dir, "Daft Punk", "Discovery")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		n++ // a new file each call, like a real download
+		return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%02d.mp3", n)), nil, 0o644)
+	}
+	const url = "https://music.youtube.com/playlist?list=x"
+
+	// Uses the music directory (MDL_MUSIC_DIR here), unlike a plain URL.
+	h.expect(t, 0, "-t", "-b", url)
+	if len(h.fake.Calls) != 2 {
+		t.Fatalf("calls = %+v", h.fake.Calls)
+	}
+	dl, beet := h.fake.Calls[0], h.fake.Calls[1]
+	if dl.Name != "yt-dlp" || dl.Dir != h.musicDir {
+		t.Errorf("download call = %+v", dl)
+	}
+	if !strings.Contains(strings.Join(dl.Args, " "), "Unknown Artist") {
+		t.Errorf("template should fall back to Unknown Artist: %v", dl.Args)
+	}
+	// beet is pointed at the new album folder only, never the whole library.
+	if want := filepath.Join(h.musicDir, "Daft Punk", "Discovery"); beet.Name != "beet" || beet.Args[len(beet.Args)-1] != want {
+		t.Errorf("beet call = %+v, want dir %s", beet, want)
+	}
+
+	// Long form, -m override, explicit artist/album, forced tool.
+	custom := filepath.Join(h.dir, "elsewhere")
+	h.expect(t, 0, "--to-library", "-m", custom, "-a", "AC/DC", "-A", "Back in Black", "--spotify", "https://x.example/a")
+	if h.fake.Calls[0].Name != "spotdl" || h.fake.Calls[0].Dir != custom {
+		t.Errorf("call = %+v", h.fake.Calls[0])
+	}
+	if got := strings.Join(h.fake.Calls[0].Args, " "); !strings.Contains(got, "AC_DC/Back in Black/{track-number}") {
+		t.Errorf("args = %s", got)
+	}
+
+	// Two URLs that produce the same album are beeted once.
+	_ = os.RemoveAll(h.musicDir)
+	h.expect(t, 0, "-t", "-b", url, "https://youtu.be/y")
+	beets := 0
+	for _, c := range h.fake.Calls {
+		if c.Name == "beet" {
+			beets++
+		}
+	}
+	if beets != 1 {
+		t.Errorf("beet ran %d times, want 1 (calls %+v)", beets, h.fake.Calls)
+	}
+}
+
+func TestToLibraryFailuresAndMisuse(t *testing.T) {
+	h := newHarness(t)
+	h.fake.Err = func(runner.Call) error { return errors.New("boom") }
+	h.expect(t, 1, "-t", "-b", "https://music.youtube.com/playlist?list=x")
+	for _, c := range h.fake.Calls {
+		if c.Name == "beet" {
+			t.Error("beet must not run after a failed download")
+		}
+	}
+	h.fake.Err = nil
+	_ = os.RemoveAll(h.musicDir)
+	h.expect(t, 2, "-t")            // no URL
+	h.expect(t, 2, "-t", "-a", "X") // still no URL
+	h.expect(t, 0, "-n", "-t", "-a", "Daft Punk", "https://open.spotify.com/album/a")
+	if !strings.Contains(h.out.String(), "Daft Punk/") || !strings.Contains(h.out.String(), "--output") {
+		t.Errorf("dry-run should show the library template:\n%s", h.out)
+	}
+	if _, err := os.Stat(h.musicDir); err == nil {
+		t.Error("dry run created the music dir")
+	}
+}
+
+// chdir moves into h.dir/<rel> (created) for the duration of the test, so
+// "the directory we're in" is predictable.
+func (h *harness) chdir(t *testing.T, rel string) string {
+	t.Helper()
+	dir := filepath.Join(h.dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	return dir
+}
+
+func (h *harness) library(t *testing.T) *library.Library {
+	t.Helper()
+	l, err := library.Load(h.libPath)
+	if err != nil {
+		t.Fatalf("library: %v", err)
+	}
+	return l
+}
+
+const (
+	spotURL = "https://open.spotify.com/album/abc"
+	ytURL   = "https://music.youtube.com/playlist?list=OLAK5"
+)
+
+func TestEveryURLIsRecordedUnderTheDirectoryNames(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "Daft Punk/Discovery")
+
+	h.expect(t, 0, spotURL)
+	if !strings.Contains(h.out.String(), "Recorded Daft Punk / Discovery") {
+		t.Errorf("out = %q", h.out)
+	}
+	h.expect(t, 0, ytURL) // same folder: the YouTube link joins the same album
+	l := h.library(t)
+	e, ok := l.Get("Daft Punk", "Discovery")
+	if !ok || e.Spotify != spotURL || e.YouTube != ytURL || l.NumAlbums() != 1 {
+		t.Errorf("entry = %+v ok=%v albums=%d", e, ok, l.NumAlbums())
+	}
+	// Recording needs no metadata lookup: the download call itself is unchanged.
+	if h.fake.Calls[0].Name != "yt-dlp" || h.fake.Calls[0].Dir != "." {
+		t.Errorf("call = %+v", h.fake.Calls[0])
+	}
+}
+
+func TestRecordOverridesAndOptOut(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "Some Artist/Some Album")
+
+	h.expect(t, 0, "-a", "Daft Punk", "-A", "Homework", spotURL)
+	if _, ok := h.library(t).Get("Daft Punk", "Homework"); !ok {
+		t.Error("--artist/--album should name the entry")
+	}
+	// Only one given: the other still comes from the directories.
+	h.expect(t, 0, "-A", "Only Album", ytURL)
+	if _, ok := h.library(t).Get("Some Artist", "Only Album"); !ok {
+		t.Errorf("artist should come from the parent directory: %v", h.library(t).Artists())
+	}
+	h.expect(t, 0, "-a", "Only Artist", spotURL+"2")
+	if _, ok := h.library(t).Get("Only Artist", "Some Album"); !ok {
+		t.Error("album should come from the current directory")
+	}
+
+	// --no-import / -N: download only, library untouched.
+	before := h.library(t).NumAlbums()
+	h.expect(t, 0, "--no-import", spotURL+"3")
+	h.expect(t, 0, "-N", spotURL+"4")
+	if h.library(t).NumAlbums() != before {
+		t.Error("--no-import must not touch the library")
+	}
+	fresh := filepath.Join(h.dir, "fresh.json")
+	h.expect(t, 0, "-N", "-L", fresh, spotURL)
+	if _, err := os.Stat(fresh); err == nil {
+		t.Error("--no-import must not create the library")
+	}
+}
+
+func TestRecordOnlyAfterSuccessfulDownload(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "A/B")
+	h.fake.Err = func(runner.Call) error { return errors.New("network down") }
+	h.expect(t, 1, spotURL)
+	if _, err := os.Stat(h.libPath); err == nil {
+		t.Error("a failed download must not be recorded")
+	}
+	// Two URLs, the first fails: only the second is recorded.
+	h.fake.Err = func(c runner.Call) error {
+		if strings.Contains(strings.Join(c.Args, " "), "bad") {
+			return errors.New("boom")
+		}
+		return nil
+	}
+	h.expect(t, 1, "https://open.spotify.com/album/bad", ytURL)
+	e, _ := h.library(t).Get("A", "B")
+	if e.Spotify != "" || e.YouTube != ytURL {
+		t.Errorf("entry = %+v", e)
+	}
+}
+
+func TestRecordWarnsAboutUnstorableAndReplacedLinks(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "A/B")
+	// A forced tool lets any host through; it downloads but cannot be stored.
+	h.expect(t, 0, "--youtube", "https://example.com/video")
+	if !strings.Contains(h.err.String(), "not recorded in the library") {
+		t.Errorf("stderr = %q", h.err)
+	}
+	if _, err := os.Stat(h.libPath); err == nil {
+		t.Error("nothing should have been stored")
+	}
+	h.expect(t, 0, spotURL)
+	h.expect(t, 0, "https://open.spotify.com/album/other")
+	if !strings.Contains(h.err.String(), "replacing the existing link for A / B") {
+		t.Errorf("stderr = %q", h.err)
+	}
+	if e, _ := h.library(t).Get("A", "B"); e.Spotify != "https://open.spotify.com/album/other" {
+		t.Errorf("entry = %+v", e)
+	}
+	h.expect(t, 0, "https://open.spotify.com/album/other") // same link again: no warning
+	if strings.Contains(h.err.String(), "replacing") {
+		t.Errorf("unexpected warning: %q", h.err)
+	}
+}
+
+func TestRecordWithCorruptLibraryKeepsDownloadButFails(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "A/B")
+	_ = os.MkdirAll(filepath.Dir(h.libPath), 0o755)
+	_ = os.WriteFile(h.libPath, []byte("{broken"), 0o644)
+	h.expect(t, 1, spotURL)
+	if len(h.fake.Calls) != 1 {
+		t.Errorf("the download should still have run: %+v", h.fake.Calls)
+	}
+	if raw, _ := os.ReadFile(h.libPath); string(raw) != "{broken" {
+		t.Errorf("a corrupt library must be left untouched, got %q", raw)
+	}
+	// Unwritable library location.
+	h.expect(t, 1, "-L", filepath.Join(h.libPath, "x", "lib.json"), spotURL)
+}
+
+func TestRecordDryRun(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "A/B")
+	h.expect(t, 0, "-n", spotURL)
+	if !strings.Contains(h.out.String(), "would record A / B in "+h.libPath) {
+		t.Errorf("out = %q", h.out)
+	}
+	if _, err := os.Stat(h.libPath); err == nil {
+		t.Error("dry run must not write the library")
+	}
+}
+
+func TestToLibraryRecordsTheFolderThatWasFilled(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "Some/Where")
+	fill := func(paths ...string) {
+		n := 0
+		h.fake.Err = func(c runner.Call) error {
+			for _, p := range paths {
+				dir := filepath.Join(c.Dir, filepath.FromSlash(p))
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return err
+				}
+				n++
+				if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.mp3", n)), nil, 0o644); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+
+	// Exactly one folder produced: that is where it is recorded.
+	fill("Daft Punk/Discovery")
+	h.expect(t, 0, "-t", ytURL)
+	if e, ok := h.library(t).Get("Daft Punk", "Discovery"); !ok || e.YouTube != ytURL {
+		t.Errorf("entry = %+v ok=%v", e, ok)
+	}
+	// --artist wins; the album still comes from the folder.
+	_ = os.RemoveAll(h.musicDir)
+	fill("Unknown Artist/Mixtape")
+	h.expect(t, 0, "-t", "-a", "Real Artist", spotURL)
+	if _, ok := h.library(t).Get("Real Artist", "Mixtape"); !ok {
+		t.Errorf("artists = %v", h.library(t).Artists())
+	}
+	// Nothing detectable (or several folders): fall back to the directories.
+	_ = os.RemoveAll(h.musicDir)
+	h.fake.Err = nil
+	h.expect(t, 0, "-t", spotURL+"x")
+	if e, ok := h.library(t).Get("Some", "Where"); !ok || e.Spotify != spotURL+"x" {
+		t.Errorf("fallback entry = %+v ok=%v", e, ok)
+	}
+	_ = os.RemoveAll(h.musicDir)
+	fill("One/A", "Two/B")
+	h.expect(t, 0, "-t", ytURL+"y")
+	if e, _ := h.library(t).Get("Some", "Where"); e.YouTube != ytURL+"y" {
+		t.Errorf("several folders should fall back: %+v", e)
+	}
+}
+
+func TestRecordNames(t *testing.T) {
+	wd, _ := os.Getwd()
+	wantArtist, wantAlbum := filepath.Base(filepath.Dir(wd)), filepath.Base(wd)
+	a, b := recordNames("", "", nil)
+	if a != wantArtist || b != wantAlbum {
+		t.Errorf("directory fallback = %q / %q, want %q / %q", a, b, wantArtist, wantAlbum)
+	}
+	if a, b := recordNames("A", "B", []string{"/m/X/Y"}); a != "A" || b != "B" {
+		t.Errorf("flags win: %q / %q", a, b)
+	}
+	if a, b := recordNames("", "", []string{"/m/X/Y"}); a != "X" || b != "Y" {
+		t.Errorf("landed folder: %q / %q", a, b)
+	}
+	if a, b := recordNames("", "B", []string{"/m/X/Y", "/m/P/Q"}); a != wantArtist || b != "B" {
+		t.Errorf("ambiguous folders fall back per field: %q / %q", a, b)
 	}
 }

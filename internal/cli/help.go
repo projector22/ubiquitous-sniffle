@@ -111,9 +111,12 @@ func (a *App) topHelp() string {
 	b.WriteString("\nFILES AND ENVIRONMENT\n")
 	b.WriteString(formatEnv())
 	b.WriteString("\nEXAMPLES\n")
-	b.WriteString(`  mdl https://open.spotify.com/album/...     download straight into the current directory
+	b.WriteString(`  mdl https://open.spotify.com/album/...     download into the current directory and record it in the library
+                                             (album = this directory's name, artist = the directory above)
+  mdl -N https://open.spotify.com/album/...  same, but do not record it
   mdl -b https://music.youtube.com/playlist?list=...   ...then run beet on it
   mdl --youtube https://example.com/...      force yt-dlp (or --spotify to force spotdl)
+  mdl -t https://music.youtube.com/playlist?list=...   file it under <Artist>/<Album>/ in the music dir
   mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
   mdl list
   mdl tui                                   browse; press d to download the selection

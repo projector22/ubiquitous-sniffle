@@ -14,7 +14,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"mdl/internal/library"
 	"mdl/internal/runner"
@@ -47,21 +49,66 @@ func ToolForURL(raw string) Tool {
 // '&' or spaces are safe.
 func Command(t Tool, rawURL string) (string, []string) {
 	if t == YtDlp {
-		return "yt-dlp", []string{
-			"--no-warnings",
-			"--progress",
-			"-f", "bestaudio/best",
-			"-x",
-			"--audio-format", "mp3",
-			"--audio-quality", "0",
-			"--embed-metadata",
-			"--embed-thumbnail",
-			"-o", "%(playlist_index)02d - %(artist)s - %(title)s.%(ext)s",
-			"--js-runtimes", "node",
-			rawURL,
-		}
+		return ytdlp("%(playlist_index)02d - %(artist)s - %(title)s.%(ext)s", rawURL)
 	}
 	return "spotdl", []string{"--bitrate", "128k", "download", rawURL}
+}
+
+func ytdlp(outputTemplate, rawURL string) (string, []string) {
+	return "yt-dlp", []string{
+		"--no-warnings",
+		"--progress",
+		"-f", "bestaudio/best",
+		"-x",
+		"--audio-format", "mp3",
+		"--audio-quality", "0",
+		"--embed-metadata",
+		"--embed-thumbnail",
+		"-o", outputTemplate,
+		"--js-runtimes", "node",
+		rawURL,
+	}
+}
+
+// Folder names used when a download carries no artist / album metadata.
+const (
+	UnknownArtist = "Unknown Artist"
+	UnknownAlbum  = "Unknown Album"
+)
+
+// LibraryCommand is like Command but makes the downloader file the tracks
+// itself under <Artist>/<Album>/ (relative to the working directory) using
+// each track's own metadata.
+//
+// A non-empty artist or album is used literally. Otherwise yt-dlp falls back
+// from album artist to artist to creator and then to "Unknown Artist", and
+// from album to playlist title to "Unknown Album". spotdl always knows both.
+// Track numbers are zero-padded when the source is a playlist or album.
+func LibraryCommand(t Tool, rawURL, artist, album string) (string, []string) {
+	if t == YtDlp {
+		artistPart := "%(album_artist,artist,creator|" + UnknownArtist + ")s"
+		if artist != "" {
+			artistPart = strings.ReplaceAll(SanitizeName(artist), "%", "%%")
+		}
+		albumPart := "%(album,playlist_title|" + UnknownAlbum + ")s"
+		if album != "" {
+			albumPart = strings.ReplaceAll(SanitizeName(album), "%", "%%")
+		}
+		return ytdlp(artistPart+"/"+albumPart+"/%(playlist_index&{:02d} - |)s%(track,title)s.%(ext)s", rawURL)
+	}
+	braces := strings.NewReplacer("{", "(", "}", ")")
+	artistPart, albumPart := "{album-artist}", "{album}"
+	if artist != "" {
+		artistPart = braces.Replace(SanitizeName(artist))
+	}
+	if album != "" {
+		albumPart = braces.Replace(SanitizeName(album))
+	}
+	return "spotdl", []string{
+		"--bitrate", "128k",
+		"--output", artistPart + "/" + albumPart + "/{track-number} - {title}.{output-ext}",
+		"download", rawURL,
+	}
 }
 
 // SelectSource chooses which of an entry's links to use. When forced is Auto,
@@ -120,6 +167,28 @@ func ArtistDir(root, artist string) string {
 // AlbumDir is <root>/<Artist>/<Album>.
 func AlbumDir(root, artist, album string) string {
 	return filepath.Join(ArtistDir(root, artist), SanitizeName(album))
+}
+
+// NamesFromDir derives (artist, album) from a directory the way a tidy music
+// folder is laid out: the album is the directory's own name and the artist is
+// the name of the directory above it. Anything that is not a usable name (a
+// filesystem root, say) becomes "Unknown Artist" / "Unknown Album".
+func NamesFromDir(dir string) (artist, album string) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return UnknownArtist, UnknownAlbum
+	}
+	usable := func(name string) bool {
+		return strings.Trim(name, `/\`) != "" && name != "." && name != ".." && !strings.HasSuffix(name, ":")
+	}
+	artist, album = filepath.Base(filepath.Dir(abs)), filepath.Base(abs)
+	if !usable(artist) {
+		artist = UnknownArtist
+	}
+	if !usable(album) {
+		album = UnknownAlbum
+	}
+	return artist, album
 }
 
 // Job is one album to download.
@@ -201,6 +270,63 @@ func (d *Downloader) DownloadURL(ctx context.Context, rawURL string, forced Tool
 	d.logf("==> %s (%s)", rawURL, tool)
 	name, args := Command(tool, rawURL)
 	return d.Runner.Run(ctx, d.Root, name, args...)
+}
+
+// DownloadURLToLibrary downloads rawURL into the library layout below Root:
+// <Root>/<Artist>/<Album>/. artist and album may be empty, in which case the
+// downloader takes them from the tracks' metadata and falls back to
+// "Unknown Artist" / "Unknown Album". It returns the album directories that
+// were created or changed, which is what a follow-up beet run should target
+// (never the whole library).
+func (d *Downloader) DownloadURLToLibrary(ctx context.Context, rawURL string, forced Tool, artist, album string) ([]string, error) {
+	tool := forced
+	if tool == Auto {
+		tool = ToolForURL(rawURL)
+	}
+	if err := d.mkdir(d.Root); err != nil {
+		return nil, err
+	}
+	before := snapshotAlbumDirs(d.Root)
+	d.logf("==> %s (%s, into the library)", rawURL, tool)
+	name, args := LibraryCommand(tool, rawURL, artist, album)
+	err := d.Runner.Run(ctx, d.Root, name, args...)
+
+	var changed []string
+	for dir, mod := range snapshotAlbumDirs(d.Root) {
+		if prev, ok := before[dir]; !ok || !prev.Equal(mod) {
+			changed = append(changed, dir)
+		}
+	}
+	sort.Strings(changed)
+	return changed, err
+}
+
+// snapshotAlbumDirs maps every <root>/<artist>/<album> directory to its
+// modification time. Missing directories simply yield an empty map.
+func snapshotAlbumDirs(root string) map[string]time.Time {
+	out := map[string]time.Time{}
+	artists, err := os.ReadDir(root)
+	if err != nil {
+		return out
+	}
+	for _, a := range artists {
+		if !a.IsDir() {
+			continue
+		}
+		albums, err := os.ReadDir(filepath.Join(root, a.Name()))
+		if err != nil {
+			continue
+		}
+		for _, al := range albums {
+			if !al.IsDir() {
+				continue
+			}
+			if info, err := al.Info(); err == nil {
+				out[filepath.Join(root, a.Name(), al.Name())] = info.ModTime()
+			}
+		}
+	}
+	return out
 }
 
 // DownloadJob downloads one album into <Root>/<Artist>/<Album> and returns

@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"mdl/internal/deps"
@@ -108,17 +109,26 @@ func (a *App) commands() []command {
 			Summary: "Download albums from the library, or the given URLs",
 			Long: "With URLs, downloads each one straight into the current directory (or --music-dir): spotdl for Spotify " +
 				"links, yt-dlp for YouTube links. This is also what plain `mdl URL` does, so `download` can be left out. " +
+				"Add --to-library to file URL downloads into the music library instead, under the artist if the tracks " +
+				"say who it is and under \"Unknown Artist\" if not. " +
+				"Every URL that downloads successfully is also recorded in the library file (see --no-import), under " +
+				"--artist/--album if given, else the folder --to-library filled, else the album named after the directory " +
+				"you ran mdl in and the artist named after the directory above it. " +
 				"With no URLs, downloads albums from the library into <music-dir>/<Artist>/<Album>/; use --artist and/or " +
 				"--album to download a subset. Spotify links are preferred when an album has both; force a service with " +
 				"--spotify or --youtube. A failed album does not stop the rest.",
 			Opts: append(append([]Opt{}, downloadOpts...),
-				Opt{'a', "artist", "NAME", "Only download this artist's albums (case-insensitive). Library downloads only."},
-				Opt{'A', "album", "NAME", "Only download albums with this name (case-insensitive). Library downloads only."}),
+				Opt{'t', "to-library", "", "For URLs: file the download under <music-dir>/<Artist>/<Album>/ instead of the current directory. Artist and album come from the tracks' metadata; missing ones become \"Unknown Artist\" / \"Unknown Album\". With --beet only the new album folders are imported."},
+				Opt{'N', "no-import", "", "Do not record downloaded URLs in the library file. By default every URL you download is recorded there."},
+				Opt{'a', "artist", "NAME", "Library downloads: only this artist's albums (case-insensitive). With URLs: the artist the download is recorded under (and, with --to-library, the artist folder)."},
+				Opt{'A', "album", "NAME", "Library downloads: only albums with this name (case-insensitive). With URLs: the album the download is recorded under (and, with --to-library, the album folder)."}),
 			Examples: []string{
 				"mdl download",
 				`mdl download -a "Daft Punk" -A Discovery`,
 				"mdl download -yb https://music.youtube.com/playlist?list=...",
 				"mdl https://open.spotify.com/album/...",
+				"mdl -t https://music.youtube.com/playlist?list=...",
+				`mdl -t -a "Daft Punk" -A Discovery https://youtu.be/...`,
 			},
 			run: a.cmdDownload,
 		},
@@ -376,31 +386,12 @@ func (a *App) cmdDownload(inv *invocation) int {
 		return a.usageErr(err)
 	}
 
-	if len(inv.args) > 0 { // ad-hoc URLs
-		if inv.vals.Has("artist") || inv.vals.Has("album") {
-			return a.usageErr(errors.New("--artist and --album only apply to library downloads, not to URLs"))
-		}
-		// Ad-hoc URLs land in the current directory unless -m says otherwise
-		// ($MDL_MUSIC_DIR only applies to the Artist/Album library layout).
-		root := inv.vals.String("music-dir")
-		if root == "" {
-			root = "."
-		}
-		dl := a.newDownloader(inv, root)
-		failed, ok := false, false
-		for _, u := range inv.args {
-			if err := dl.DownloadURL(inv.ctx, u, forced); err != nil {
-				fmt.Fprintf(a.Stderr, "mdl: %s: %v\n", u, err)
-				failed = true
-				continue
-			}
-			ok = true
-		}
-		var dirs []string
-		if ok {
-			dirs = []string{root}
-		}
-		return a.finish(inv, dirs, failed)
+	toLibrary := inv.vals.Bool("to-library")
+	if len(inv.args) > 0 {
+		return a.downloadURLs(inv, forced, toLibrary)
+	}
+	if toLibrary {
+		return a.usageErr(errors.New("--to-library only applies to URLs; library downloads always use <Artist>/<Album>"))
 	}
 
 	lib, code := a.loadLibrary(inv)
@@ -412,6 +403,129 @@ func (a *App) cmdDownload(inv *invocation) int {
 		return a.fail("%v", err)
 	}
 	return a.runJobs(inv, jobs, forced)
+}
+
+// downloadURLs handles `mdl [-t] URL...`: download each URL, then (unless
+// --no-import) record it in the library file.
+func (a *App) downloadURLs(inv *invocation, forced downloader.Tool, toLibrary bool) int {
+	// Plain URLs land in the current directory unless -m says otherwise
+	// ($MDL_MUSIC_DIR only applies to the Artist/Album layout).
+	root := inv.vals.String("music-dir")
+	if root == "" {
+		root = "."
+	}
+	if toLibrary {
+		root = inv.musicDir
+	}
+	dl := a.newDownloader(inv, root)
+	failed, seen := false, map[string]bool{}
+	var dirs []string
+	for _, u := range inv.args {
+		var landed []string // album folders this URL produced (--to-library only)
+		var err error
+		if toLibrary {
+			landed, err = dl.DownloadURLToLibrary(inv.ctx, u, forced, inv.vals.String("artist"), inv.vals.String("album"))
+			for _, d := range landed {
+				if err == nil && !seen[d] {
+					seen[d] = true
+					dirs = append(dirs, d)
+				}
+			}
+		} else {
+			err = dl.DownloadURL(inv.ctx, u, forced)
+			if err == nil && !seen[root] {
+				seen[root] = true
+				dirs = append(dirs, root)
+			}
+		}
+		if err != nil {
+			fmt.Fprintf(a.Stderr, "mdl: %s: %v\n", u, err)
+			failed = true
+			continue
+		}
+		if !inv.vals.Bool("no-import") {
+			if _, cerr := library.ClassifyURL(u); cerr != nil {
+				// Downloaded fine, but only Spotify / YouTube links can be stored.
+				fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", cerr)
+			} else if err := a.recordURL(inv, u, landed, toLibrary); err != nil {
+				fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", err)
+				failed = true
+			}
+		}
+	}
+	return a.finish(inv, dirs, failed)
+}
+
+// recordNames decides which artist and album a downloaded URL is filed under
+// in the library file, in this order:
+//
+//  1. --artist / --album;
+//  2. with --to-library, the folder the downloader actually filled, when it
+//     produced exactly one (<Artist>/<Album>);
+//  3. the directory mdl was run in: its name is the album and the name of
+//     the directory above it is the artist.
+//
+// Each of artist and album is resolved independently, so the library gets an
+// entry no matter what the metadata lookup found.
+func recordNames(flagArtist, flagAlbum string, landed []string) (artist, album string) {
+	artist, album = flagArtist, flagAlbum
+	if len(landed) == 1 {
+		if artist == "" {
+			artist = filepath.Base(filepath.Dir(landed[0]))
+		}
+		if album == "" {
+			album = filepath.Base(landed[0])
+		}
+	}
+	if artist == "" || album == "" {
+		dirArtist, dirAlbum := downloader.NamesFromDir(".")
+		if artist == "" {
+			artist = dirArtist
+		}
+		if album == "" {
+			album = dirAlbum
+		}
+	}
+	return artist, album
+}
+
+// recordURL stores rawURL (a Spotify or YouTube link) in the library file
+// under the names chosen by recordNames.
+func (a *App) recordURL(inv *invocation, rawURL string, landed []string, toLibrary bool) error {
+	var entry library.Entry
+	if err := entry.SetURL(rawURL); err != nil {
+		return err
+	}
+	if !toLibrary {
+		landed = nil
+	}
+	artist, album := recordNames(inv.vals.String("artist"), inv.vals.String("album"), landed)
+
+	lib, err := library.LoadOrNew(inv.libPath)
+	if err != nil {
+		return err
+	}
+	if canon, ok := lib.ResolveArtist(artist); ok {
+		if al, ok := lib.ResolveAlbum(canon, album); ok {
+			old, _ := lib.Get(canon, al)
+			if old.Spotify != "" && entry.Spotify != "" && old.Spotify != entry.Spotify ||
+				old.YouTube != "" && entry.YouTube != "" && old.YouTube != entry.YouTube {
+				fmt.Fprintf(a.Stderr, "mdl: replacing the existing link for %s / %s in the library\n", canon, al)
+			}
+		}
+	}
+	if inv.dry {
+		fmt.Fprintf(a.Stdout, "would record %s / %s in %s\n", artist, album, inv.libPath)
+		return nil
+	}
+	if err := lib.Add(artist, album, entry); err != nil {
+		return err
+	}
+	if err := lib.Save(inv.libPath); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Stdout, "Recorded %s / %s in %s\n", artist, album, inv.libPath)
+	return nil
 }
 
 func (a *App) newDownloader(inv *invocation, root string) *downloader.Downloader {
