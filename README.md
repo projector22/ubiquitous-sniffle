@@ -225,3 +225,5 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 - [ ] Generate an edit file with -c. Import with and without artist defined
 - [ ] Choose default editor, not just vi
 - [ ] Dependabot and CI
+- [ ] -m should use the targetted path for import data.
+- [ ] Import for old spotdll
