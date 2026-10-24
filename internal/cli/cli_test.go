@@ -449,7 +449,7 @@ func TestEditCommand(t *testing.T) {
 	}
 	h.app.Getenv = func(k string) string { return map[string]string{"MDL_LIBRARY": h.libPath}[k] }
 	h.expect(t, 0, "edit")
-	if h.fake.Calls[0].Name != "vi" {
+	if h.fake.Calls[0].Name != "nano" {
 		t.Errorf("call = %+v", h.fake.Calls[0])
 	}
 
