@@ -1,0 +1,26 @@
+# Keep Go modules and the GitHub Actions used by CI up to date. Pull requests
+# are opened weekly, grouped to keep the noise down, and tested by ci.yml.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]

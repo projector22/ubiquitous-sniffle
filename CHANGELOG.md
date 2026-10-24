@@ -4,6 +4,10 @@
 
 ### Added
 
+- GitHub Actions: `ci.yml` tests every pull request (format, `go mod tidy`, vet, race tests with coverage gate,
+  `golangci-lint`, cross-compile); `release.yml` tests, builds and publishes a GitHub release for every `vX.Y.Z` tag.
+- Dependabot for Go modules and GitHub Actions (weekly, grouped).
+- `.golangci.yml` for golangci-lint v2.
 - `mdl -c` / `mdl import -c [FILE]`: create (or edit, if it exists) a batch file from a sample in your editor, then
   import it into the library. Modelled on `spotdll.py -c`. Saving the sample untouched imports nothing.
 - `mdl import -d` / `--delete`: remove the batch file after a successful import (like `spotdll.py -d`).

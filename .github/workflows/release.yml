@@ -1,0 +1,38 @@
+name: Release
+
+# Pushing a tag such as v1.2.3 (see `make tag TAG=v1.2.3`) tests the code,
+# builds archives for every platform and publishes a GitHub release.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # `git describe` and release notes need the history
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: make check
+      - name: Build archives and checksums
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: make dist VERSION="$VERSION"
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          # v1.2.3-rc1 and friends are marked as pre-releases
+          prerelease: ${{ contains(github.ref_name, '-') }}

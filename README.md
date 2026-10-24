@@ -240,11 +240,16 @@ without downloading anything (`mdl -n ...` uses the same seam for dry runs).
 
 ### CI
 
-* **On every commit / PR** (`.github/workflows/ci.yml`): format check, `go mod tidy` check, `go vet` for Linux and Windows,
-  race-enabled tests with an 85 % coverage gate on Linux and macOS, `golangci-lint`, then a full
-  cross-platform build whose archives are uploaded as workflow artifacts.
-* **On a `vX.Y.Z` tag** (`.github/workflows/release.yml`): the same checks, then archives and
-  `checksums.txt` are published as a GitHub release.
+* **On every pull request** (`.github/workflows/ci.yml`): format check, `go mod tidy` check, `go vet` for Linux and
+  Windows, race-enabled tests with an 85 % coverage gate on Linux and macOS, `golangci-lint` (configured in
+  `.golangci.yml`), and a cross-compile of every release target. Run the same checks locally with `make check`
+  and `make lint`.
+* **On a `vX.Y.Z` tag** (`.github/workflows/release.yml`): the same checks, then archives for Linux, macOS and
+  Windows plus `checksums.txt` are built with `make dist` and published as a GitHub release with generated
+  release notes. A tag with a suffix (`v1.2.3-rc1`) is marked as a pre-release. Cut one with
+  `make tag TAG=v1.2.3`.
+* **Dependabot** (`.github/dependabot.yml`): every Monday it opens one grouped pull request for Go module updates
+  (minor and patch) and one for GitHub Actions updates, which CI then tests like any other pull request.
 
 ### Module path
 
@@ -257,7 +262,7 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 
 ## Features to build
 
-- [ ] Dependabot and CI.
+- [x] Dependabot and CI.
 - [ ] Choose default editor, not just vi
 - [x] Generate an edit file with -c. Import with and without artist defined
   - [ ] The default behaviour for running mdl without arguments if a mdl.json is present, is to download on it.
