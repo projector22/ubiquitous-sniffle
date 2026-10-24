@@ -727,7 +727,7 @@ func (a *App) editorCommand(v *Values) []string {
 		}
 	}
 	if editor == "" {
-		editor = "vi"
+		editor = "nano"
 	}
 	return strings.Fields(editor)
 }
