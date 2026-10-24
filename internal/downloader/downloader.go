@@ -178,17 +178,33 @@ func NamesFromDir(dir string) (artist, album string) {
 	if err != nil {
 		return UnknownArtist, UnknownAlbum
 	}
-	usable := func(name string) bool {
-		return strings.Trim(name, `/\`) != "" && name != "." && name != ".." && !strings.HasSuffix(name, ":")
-	}
 	artist, album = filepath.Base(filepath.Dir(abs)), filepath.Base(abs)
-	if !usable(artist) {
+	if !usableName(artist) {
 		artist = UnknownArtist
 	}
-	if !usable(album) {
+	if !usableName(album) {
 		album = UnknownAlbum
 	}
 	return artist, album
+}
+
+// NameOfDir returns the usable name of the directory itself (not its parent):
+// the last element of its absolute path. ok is false for a filesystem root
+// and other paths without a real name.
+func NameOfDir(dir string) (name string, ok bool) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", false
+	}
+	name = filepath.Base(abs)
+	if !usableName(name) {
+		return "", false
+	}
+	return name, true
+}
+
+func usableName(name string) bool {
+	return strings.Trim(name, `/\`) != "" && name != "." && name != ".." && !strings.HasSuffix(name, ":")
 }
 
 // Job is one album to download.

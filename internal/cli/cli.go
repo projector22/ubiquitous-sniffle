@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -175,14 +176,26 @@ func (a *App) commands() []command {
 			run:  a.cmdEdit,
 		},
 		{
-			Name: "import", Args: "FILE",
-			Summary: "Import a file written by the old shell script",
-			Long: "Reads the previous formats - {\"Album\": \"url\"} for a single artist, or {\"Artist\": {\"Album\": \"url\"}} " +
-				"for several - and merges them into the library.",
-			Opts: []Opt{{'a', "artist", "NAME", "Artist for a single-artist file (required for that format)."}},
+			Name: "import", Args: "[FILE]",
+			Summary: "Import albums from a batch file, or create and edit one with -c",
+			Long: "A batch file lists albums and their links in one of two shapes: {\"Album\": \"url\"} for a single artist, " +
+				"or {\"Artist\": {\"Album\": \"url\"}} for several (the formats of the old shell and Python versions). " +
+				"With --create, mdl first makes FILE (default ./mdl.json) from a sample, or reuses it if it already exists, " +
+				"opens it in your editor, and imports it when the editor closes; nothing is downloaded. " +
+				"Without --create, FILE must already exist. A single-artist file does not say whose albums they are: " +
+				"they are filed under --artist if given, otherwise under the name of the directory the file is in. " +
+				"A file with its own artists ignores --artist. Existing albums are updated, never removed.",
+			Opts: []Opt{
+				{'c', "create", "", "Create FILE from a sample (or edit it if it exists) in your editor, then import it. Saving the sample untouched imports nothing."},
+				{'a', "artist", "NAME", "Artist for a single-artist file. Default: the name of the directory containing FILE."},
+				{'d', "delete", "", "Delete FILE after it has been imported successfully."},
+			},
 			Examples: []string{
-				`mdl import old/mdl.json -a "Daft Punk"`,
-				"mdl import ~/music/mdl.json",
+				"mdl -c                                   create ./mdl.json, edit it, import it",
+				`mdl import -c -a "Daft Punk"             same, filing a single-artist file under Daft Punk`,
+				"mdl import -cd ~/Music/Abba/abba.json    edit and import that file, then delete it",
+				"mdl import ~/Music/Daft\\ Punk/mdl.json    import an existing file (artist: Daft Punk, from the directory)",
+				`mdl import old/mdl.json -a "Some Artist"`,
 			},
 			run: a.cmdImport,
 		},
@@ -255,6 +268,11 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runCommand(ctx, dl, newValues(), args)
 	}
 
+	// `mdl -c [FILE]` is shorthand for `mdl import -c [FILE]`.
+	if imp := a.implicitCreate(args); imp != nil {
+		return a.runCommand(ctx, imp, newValues(), args)
+	}
+
 	globals, rest, err := parse(globalOpts, args, true)
 	if err != nil {
 		return a.usageErr(err)
@@ -292,6 +310,22 @@ func (a *App) implicitDownload(args []string) *command {
 		return nil
 	}
 	return dl
+}
+
+// implicitCreate returns the import command when args are `[options] -c
+// [FILE]`: --create given, and no command name or URL. It lets the old
+// `script -c` habit work as plain `mdl -c`.
+func (a *App) implicitCreate(args []string) *command {
+	imp := a.find("import")
+	specs := append(append([]Opt{}, imp.Opts...), globalOpts...)
+	vals, rest, err := parse(specs, args, true)
+	if err != nil || !vals.Bool("create") || len(rest) > 1 {
+		return nil
+	}
+	if len(rest) == 1 && (a.find(rest[0]) != nil || isURL(rest[0])) {
+		return nil
+	}
+	return imp
 }
 
 // runCommand parses cmd's own options from args, merges them with the global
@@ -683,8 +717,10 @@ func (a *App) cmdTUI(inv *invocation) int {
 	return a.runJobs(inv, jobs, forced)
 }
 
-func (a *App) cmdEdit(inv *invocation) int {
-	editor := inv.vals.String("editor")
+// editorCommand resolves the editor to run as program + leading arguments:
+// --editor, else $VISUAL, else $EDITOR, else vi.
+func (a *App) editorCommand(v *Values) []string {
+	editor := v.String("editor")
 	for _, name := range []string{"VISUAL", "EDITOR"} {
 		if editor == "" {
 			editor = a.Getenv(name)
@@ -693,7 +729,11 @@ func (a *App) cmdEdit(inv *invocation) int {
 	if editor == "" {
 		editor = "vi"
 	}
-	parts := strings.Fields(editor)
+	return strings.Fields(editor)
+}
+
+func (a *App) cmdEdit(inv *invocation) int {
+	parts := a.editorCommand(inv.vals)
 
 	if _, err := os.Stat(inv.libPath); errors.Is(err, fs.ErrNotExist) && !inv.dry {
 		if err := library.New().Save(inv.libPath); err != nil {
@@ -714,17 +754,85 @@ func (a *App) cmdEdit(inv *invocation) int {
 }
 
 func (a *App) cmdImport(inv *invocation) int {
-	if len(inv.args) != 1 {
-		return a.usageErr(errors.New("import: expected exactly one FILE"))
+	create := inv.vals.Bool("create")
+	var path string
+	switch {
+	case len(inv.args) > 1:
+		return a.usageErr(errors.New("import: expected at most one FILE"))
+	case len(inv.args) == 1:
+		path = inv.args[0]
+	case create:
+		path = defaultBatchFile
+	default:
+		return a.usageErr(errors.New("import: expected a FILE (or use --create to make one)"))
 	}
-	data, err := os.ReadFile(inv.args[0])
+	if create {
+		if code, proceed := a.editBatchFile(inv, path); !proceed {
+			return code
+		}
+	}
+	return a.importBatchFile(inv, path)
+}
+
+// defaultBatchFile is where `mdl -c` creates the batch file, like the
+// spotdll.json of the original Python version.
+const defaultBatchFile = "mdl.json"
+
+// editBatchFile implements --create: make the file from the sample when it
+// does not exist, open it in the editor, and report whether the caller should
+// go on to import it. A freshly created file that was saved untouched is
+// removed again, since the sample is only a placeholder.
+func (a *App) editBatchFile(inv *invocation, path string) (code int, proceed bool) {
+	template := library.BatchTemplate()
+	_, statErr := os.Stat(path)
+	existed := statErr == nil
+	if !existed && !inv.dry {
+		if err := os.WriteFile(path, template, 0o644); err != nil {
+			return a.fail("creating %s: %v", path, err), false
+		}
+		fmt.Fprintf(a.Stderr, "Created %s - add albums as \"Album\": \"url\" (or \"Artist\": {\"Album\": \"url\"}).\n", path)
+	}
+	parts := a.editorCommand(inv.vals)
+	if err := a.runnerFor(inv).Run(inv.ctx, "", parts[0], append(parts[1:], path)...); err != nil {
+		return a.fail("%v", err), false
+	}
+	if inv.dry {
+		return exitOK, false
+	}
+	if !existed {
+		if after, err := os.ReadFile(path); err == nil && bytes.Equal(after, template) {
+			_ = os.Remove(path)
+			fmt.Fprintln(a.Stdout, "No changes made; nothing imported.")
+			return exitOK, false
+		}
+	}
+	return exitOK, true
+}
+
+// importBatchFile merges the batch file at path into the library.
+func (a *App) importBatchFile(inv *invocation, path string) int {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return a.fail("%v", err)
 	}
-	imported, err := library.ImportLegacy(data, inv.vals.String("artist"))
-	if err != nil {
-		return a.fail("%s: %v", inv.args[0], err)
+	artist := inv.vals.String("artist")
+	if artist == "" {
+		artist = downloader.UnknownArtist
+		if name, ok := downloader.NameOfDir(filepath.Dir(path)); ok {
+			artist = name
+		}
 	}
+	imported, usedDefault, err := library.ImportBatch(data, artist)
+	if err != nil {
+		return a.fail("%s: %v", path, err)
+	}
+	switch {
+	case usedDefault && !inv.vals.Has("artist"):
+		fmt.Fprintf(a.Stdout, "No --artist given: using %q, the name of the directory containing %s, as the artist.\n", artist, path)
+	case !usedDefault && inv.vals.Has("artist"):
+		fmt.Fprintf(a.Stderr, "mdl: --artist ignored: %s names its own artists\n", path)
+	}
+
 	lib, err := library.LoadOrNew(inv.libPath)
 	if err != nil {
 		return a.fail("%v", err)
@@ -733,14 +841,24 @@ func (a *App) cmdImport(inv *invocation) int {
 	if err != nil {
 		return a.fail("%v", err)
 	}
-	if inv.dry {
+	switch {
+	case inv.dry:
 		fmt.Fprintf(a.Stdout, "would import %d album(s) into %s\n", n, inv.libPath)
 		return exitOK
+	case n == 0:
+		fmt.Fprintf(a.Stdout, "Nothing to import in %s.\n", path)
+	default:
+		if err := lib.Save(inv.libPath); err != nil {
+			return a.fail("saving library: %v", err)
+		}
+		fmt.Fprintf(a.Stdout, "Imported %d album(s) into %s\n", n, inv.libPath)
 	}
-	if err := lib.Save(inv.libPath); err != nil {
-		return a.fail("saving library: %v", err)
+	if inv.vals.Bool("delete") {
+		if err := os.Remove(path); err != nil {
+			return a.fail("deleting %s: %v", path, err)
+		}
+		fmt.Fprintf(a.Stdout, "Deleted %s\n", path)
 	}
-	fmt.Fprintf(a.Stdout, "Imported %d album(s) into %s\n", n, inv.libPath)
 	return exitOK
 }
 

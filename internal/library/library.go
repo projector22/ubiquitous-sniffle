@@ -329,51 +329,75 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// ImportLegacy converts the two file formats used by the old shell script:
+// Placeholder values of the template written by `mdl import --create`.
+// Entries that still carry SampleURL are ignored on import, so saving the
+// template untouched can never add a fake album to the library.
+const (
+	SampleAlbum = "SAMPLE_ALBUM_NAME"
+	SampleURL   = "https://open.spotify.com/album/your_custom_spotify_url"
+)
+
+// BatchTemplate returns the starting content of a new batch (edit) file: the
+// single-artist form with one placeholder album.
+func BatchTemplate() []byte {
+	return []byte("{\n  \"" + SampleAlbum + "\": \"" + SampleURL + "\"\n}\n")
+}
+
+// ImportBatch reads a batch file in either of its two shapes:
 //
 //	single artist:  {"Album": "url"}
 //	multi artist:   {"Artist": {"Album": "url"}}
 //
-// For the single-artist form defaultArtist names the artist.
-func ImportLegacy(data []byte, defaultArtist string) (*Library, error) {
+// (the formats of the old shell and Python versions). A single-artist file
+// does not say whose albums they are, so they are filed under defaultArtist;
+// usedDefault reports whether that happened. Placeholder entries (SampleURL)
+// are skipped.
+func ImportBatch(data []byte, defaultArtist string) (lib *Library, usedDefault bool, err error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("not a JSON object: %w", err)
+		return nil, false, fmt.Errorf("not a JSON object: %w", err)
 	}
-	lib := New()
+	lib = New()
 	for key, val := range raw {
 		var flat string
 		if json.Unmarshal(val, &flat) == nil {
 			// Single-artist form: key is an album, value a URL.
+			if strings.TrimSpace(flat) == SampleURL {
+				continue
+			}
 			if strings.TrimSpace(defaultArtist) == "" {
-				return nil, fmt.Errorf("%q maps straight to a URL, so this is a single-artist file: pass --artist", key)
+				return nil, false, fmt.Errorf("%q maps straight to a URL, so this is a single-artist file: pass --artist", key)
 			}
 			var e Entry
 			if err := e.SetURL(flat); err != nil {
-				return nil, fmt.Errorf("%s: %w", key, err)
+				return nil, false, fmt.Errorf("%s: %w", key, err)
 			}
 			if err := lib.Add(defaultArtist, key, e); err != nil {
-				return nil, err
+				return nil, false, err
 			}
+			usedDefault = true
 			continue
 		}
 		var albums map[string]json.RawMessage
 		if err := json.Unmarshal(val, &albums); err != nil {
-			return nil, fmt.Errorf("%q: unsupported value", key)
+			return nil, false, fmt.Errorf("%q: unsupported value", key)
 		}
 		for album, v := range albums {
 			var u string
 			if err := json.Unmarshal(v, &u); err != nil {
-				return nil, fmt.Errorf("%s / %s: expected a URL string; this looks like it is already in the new format (use it directly with --library)", key, album)
+				return nil, false, fmt.Errorf("%s / %s: expected a URL string; this looks like it is already in the new format (use it directly with --library)", key, album)
+			}
+			if strings.TrimSpace(u) == SampleURL {
+				continue
 			}
 			var e Entry
 			if err := e.SetURL(u); err != nil {
-				return nil, fmt.Errorf("%s / %s: %w", key, album, err)
+				return nil, false, fmt.Errorf("%s / %s: %w", key, album, err)
 			}
 			if err := lib.Add(key, album, e); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		}
 	}
-	return lib, nil
+	return lib, usedDefault, nil
 }

@@ -107,6 +107,40 @@ Run `mdl --help` for the full reference, or `mdl <command> --help`.
 Every option has a short and a long form (`-s`/`--spotdl`, `-b`/`--beet`, `-a`/`--artist`, …),
 short flags combine (`-sb`), and values can be attached (`--artist=NAME`, `-aNAME`).
 
+### Batch files: `mdl -c`
+
+For adding several albums at once, `-c` (the old `spotdll.py -c`) makes a small JSON file, opens it in your
+editor, and imports it into the library when you close the editor. Nothing is downloaded; run `mdl download`
+afterwards.
+
+```sh
+cd ~/Music/Daft\ Punk
+mdl -c                    # creates ./mdl.json from a sample (or edits it if it exists), then imports it
+mdl -cd                   # the same, and delete mdl.json after a successful import
+mdl -c -a "Daft Punk"     # name the artist explicitly
+mdl import -c path/to/albums.json    # use another file (mdl -c path/to/albums.json also works)
+```
+
+The file can have either shape, and mdl works out which:
+
+```json
+{ "Discovery": "https://open.spotify.com/album/...", "Homework": "https://music.youtube.com/playlist?list=..." }
+```
+
+```json
+{ "Daft Punk": { "Discovery": "https://open.spotify.com/album/..." }, "Abba": { "Arrival": "https://youtu.be/..." } }
+```
+
+- **Artist defined in the file** (second shape): the artists come from the file; `--artist` is ignored (with a note).
+- **Artist defined with `-a`** (first shape): all albums go under that artist.
+- **No artist at all** (first shape, no `-a`): the artist is the name of the directory the file is in, just as
+  the Python version treated the current directory as the artist folder. mdl says which name it used.
+
+Details: the sample is a single placeholder album, and mdl ignores that placeholder, so saving the sample
+untouched imports nothing (a freshly created file left untouched is removed again). Links are classified as
+Spotify or YouTube automatically; anything else is an error and nothing from that file is imported. Existing
+albums are updated, never removed. `mdl import FILE` does the import without opening an editor.
+
 ### Folder layout
 
 ```
@@ -159,16 +193,17 @@ Bubble Tea handles raw mode, mouse and resizing, so it works on Linux, macOS and
 
 ### Migrating from the shell script
 
-The old `-c` / `-d` JSON files can be imported:
+The old `-c` / `-d` JSON files (and `spotdll.json` from the Python version) can be imported:
 
 ```sh
 mdl import path/to/single-artist.json -a "Artist Name"   # {"Album": "url"}
+mdl import path/to/single-artist.json                    # same, artist = name of the file's directory
 mdl import path/to/multi-artist.json                     # {"Artist": {"Album": "url"}}
 ```
 
 | Old | New |
 | --- | --- |
-| `script.sh -c` / `-d` (edit JSON) | `mdl edit`, `mdl add`, `mdl tui` |
+| `script.sh -c` / `-d` (edit JSON) | `mdl -c` (edit + import), `mdl edit`, `mdl add`, `mdl tui` |
 | `script.sh -b` | `mdl beet` |
 | `script.sh URL` | `mdl URL` |
 | `script.sh -s URL`, `-y URL` | `mdl -s URL`, `mdl -y URL` |
@@ -222,7 +257,7 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 
 ## Features to build
 
-- [ ] Generate an edit file with -c. Import with and without artist defined
+- [x] Generate an edit file with -c. Import with and without artist defined
 - [ ] Choose default editor, not just vi
 - [ ] Dependabot and CI
 - [ ] -m should use the targetted path for import data.

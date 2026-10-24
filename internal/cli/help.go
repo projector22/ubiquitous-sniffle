@@ -125,7 +125,8 @@ func (a *App) topHelp() string {
   mdl download https://music.youtube.com/playlist?list=...
   mdl beet ~/Music/Daft\ Punk               run beet on a folder
   mdl install                               install beet, yt-dlp and spotdl
-  mdl import old/mdl.json -a "Some Artist"  migrate a file from the old shell script
+  mdl -c                                    create ./mdl.json, edit it, import its albums
+  mdl import old/mdl.json -a "Some Artist"  import a batch file (artist from -a, else its directory)
 `)
 	b.WriteString("\nEXIT STATUS\n  0 success   1 a command failed   2 usage error   130 interrupted\n")
 	return b.String()
