@@ -7,7 +7,7 @@ VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo de
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 BIN_DIR   := bin
 DIST      := dist
-PREFIX    ?= /usr/local
+INSTALL_DIR ?= $(HOME)/.local/bin
 COVER_MIN ?= 85
 PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 SHA256    := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
@@ -29,12 +29,15 @@ build: ## Build ./bin/mdl for this machine
 run: ## Run mdl from source: make run ARGS="list -u"
 	$(GO) run -ldflags "-X main.version=$(VERSION)" $(PKG) $(ARGS)
 
-install: build ## Install to $(PREFIX)/bin (override PREFIX / DESTDIR)
-	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 0755 $(BIN_DIR)/$(BINARY) $(DESTDIR)$(PREFIX)/bin/$(BINARY)
+install: build ## Install to ~/.local/bin/mdl (override INSTALL_DIR / DESTDIR)
+	install -d $(DESTDIR)$(INSTALL_DIR)
+	install -m 0755 $(BIN_DIR)/$(BINARY) $(DESTDIR)$(INSTALL_DIR)/$(BINARY)
+	@echo "Installed $(DESTDIR)$(INSTALL_DIR)/$(BINARY)"
+	@case ":$$PATH:" in *":$(INSTALL_DIR):"*) ;; *) echo "Add it to your PATH:  export PATH=\"$(INSTALL_DIR):\$$PATH\"";; esac
 
-uninstall: ## Remove the installed binary
-	rm -f $(DESTDIR)$(PREFIX)/bin/$(BINARY)
+uninstall: ## Remove the installed binary (and the directory if now empty)
+	rm -f $(DESTDIR)$(INSTALL_DIR)/$(BINARY)
+	-rmdir $(DESTDIR)$(INSTALL_DIR) 2>/dev/null
 
 deps: build ## Install beet, yt-dlp and spotdl (via `mdl install`)
 	$(BIN_DIR)/$(BINARY) install
