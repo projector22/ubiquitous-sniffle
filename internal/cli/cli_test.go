@@ -988,7 +988,7 @@ func TestImportCreateMakesEditsAndImportsTheFile(t *testing.T) {
 
 	h.expect(t, 0, "import", "--create")
 	// The editor was opened on ./mdl.json, which was created from the sample first.
-	if c := h.fake.Calls[0]; c.Name != "vi" || c.Args[len(c.Args)-1] != "mdl.json" {
+	if c := h.fake.Calls[0]; c.Name != "nano" || c.Args[len(c.Args)-1] != "mdl.json" {
 		t.Errorf("editor call = %+v", c)
 	}
 	if !strings.Contains(h.err.String(), "Created mdl.json") {
