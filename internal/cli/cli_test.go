@@ -1158,7 +1158,7 @@ func TestImportCreateDryRunAndErrors(t *testing.T) {
 	h := newHarness(t)
 	dir := h.chdir(t, "A")
 	h.expect(t, 0, "-n", "-c")
-	if !strings.Contains(h.out.String(), "+ vi mdl.json") {
+	if !strings.Contains(h.out.String(), "+ nano mdl.json") {
 		t.Errorf("dry run should show the editor command: %q", h.out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "mdl.json")); err == nil {
