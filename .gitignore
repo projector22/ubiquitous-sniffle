@@ -5,3 +5,5 @@ file.spotdl
 
 *.mp3
 mdl.json
+
+bin/
