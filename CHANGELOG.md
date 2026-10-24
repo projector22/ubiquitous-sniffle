@@ -1,5 +1,22 @@
 # Ubiquitous Sniffle
 
+## Unreleased
+
+### Added
+
+- `mdl -c` / `mdl import -c [FILE]`: create (or edit, if it exists) a batch file from a sample in your editor, then
+  import it into the library. Modelled on `spotdll.py -c`. Saving the sample untouched imports nothing.
+- `mdl import -d` / `--delete`: remove the batch file after a successful import (like `spotdll.py -d`).
+
+### Changed
+
+- `mdl import` of a single-artist file (`{"Album": "url"}`) no longer requires `--artist`: without it the albums
+  are filed under the name of the directory containing the file.
+
+### Fixed
+
+- A test no longer leaves an `internal/cli/Daft Punk` directory behind in the source tree.
+
 ## v0.2.4 - 2024-06-03
 
 ### Added

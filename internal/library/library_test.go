@@ -286,9 +286,9 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
-func TestImportLegacy(t *testing.T) {
+func TestImportBatch(t *testing.T) {
 	t.Run("single artist", func(t *testing.T) {
-		l, err := ImportLegacy([]byte(`{"Discovery":"https://open.spotify.com/album/a","Homework":"https://music.youtube.com/playlist?list=b"}`), "Daft Punk")
+		l, _, err := ImportBatch([]byte(`{"Discovery":"https://open.spotify.com/album/a","Homework":"https://music.youtube.com/playlist?list=b"}`), "Daft Punk")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,7 +300,7 @@ func TestImportLegacy(t *testing.T) {
 		}
 	})
 	t.Run("multi artist", func(t *testing.T) {
-		l, err := ImportLegacy([]byte(`{"A":{"X":"https://open.spotify.com/album/1"},"B":{"Y":"https://youtu.be/2"}}`), "")
+		l, _, err := ImportBatch([]byte(`{"A":{"X":"https://open.spotify.com/album/1"},"B":{"Y":"https://youtu.be/2"}}`), "")
 		if err != nil || l.NumArtists() != 2 {
 			t.Fatalf("got %v, %v", l, err)
 		}
@@ -314,10 +314,42 @@ func TestImportLegacy(t *testing.T) {
 		"not an object":         {`[1]`, "", "not a JSON object"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ImportLegacy([]byte(tc.in), tc.artist)
+			_, _, err := ImportBatch([]byte(tc.in), tc.artist)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestBatchTemplateAndPlaceholders(t *testing.T) {
+	tmpl := BatchTemplate()
+	if !strings.Contains(string(tmpl), SampleAlbum) || !strings.Contains(string(tmpl), SampleURL) {
+		t.Errorf("template = %s", tmpl)
+	}
+	// The untouched template imports nothing, whichever artist is supplied.
+	l, used, err := ImportBatch(tmpl, "Anyone")
+	if err != nil || l.NumAlbums() != 0 || used {
+		t.Errorf("template import: %d albums, used=%v, err=%v", l.NumAlbums(), used, err)
+	}
+	// ...even without a default artist (a pure placeholder needs none).
+	if _, _, err := ImportBatch(tmpl, ""); err != nil {
+		t.Errorf("template without artist: %v", err)
+	}
+	// Placeholders inside a nested file are skipped too, real albums kept.
+	l, used, err = ImportBatch([]byte(`{"A": {"X": "`+SampleURL+`", "Y": "https://youtu.be/y"}}`), "")
+	if err != nil || l.NumAlbums() != 1 || used {
+		t.Errorf("nested: %d albums, used=%v, err=%v", l.NumAlbums(), used, err)
+	}
+}
+
+func TestImportBatchReportsWhetherTheDefaultArtistWasUsed(t *testing.T) {
+	_, used, err := ImportBatch([]byte(`{"Album": "https://youtu.be/y"}`), "Given")
+	if err != nil || !used {
+		t.Errorf("flat: used=%v err=%v", used, err)
+	}
+	_, used, err = ImportBatch([]byte(`{"Artist": {"Album": "https://youtu.be/y"}}`), "Given")
+	if err != nil || used {
+		t.Errorf("nested: used=%v err=%v", used, err)
 	}
 }

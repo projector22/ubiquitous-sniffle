@@ -482,10 +482,12 @@ func TestImportCommand(t *testing.T) {
 	_ = os.WriteFile(single, []byte(`{"Discovery":"https://open.spotify.com/album/a","Homework":"https://open.spotify.com/album/b"}`), 0o644)
 	_ = os.WriteFile(multi, []byte(`{"Abba":{"Arrival":"https://youtu.be/x"}}`), 0o644)
 
-	h.expect(t, 1, "import", single) // needs --artist
-	if !strings.Contains(h.err.String(), "--artist") {
-		t.Errorf("stderr = %q", h.err)
+	// No --artist: a single-artist file is filed under the directory it is in.
+	h.expect(t, 0, "import", single)
+	if _, ok := h.library(t).Get(filepath.Base(h.dir), "Discovery"); !ok {
+		t.Errorf("artists = %v, want the file's directory %q", h.library(t).Artists(), filepath.Base(h.dir))
 	}
+	_ = os.Remove(h.libPath)
 	h.expect(t, 0, "-n", "import", single, "-a", "Daft Punk")
 	if _, err := os.Stat(h.libPath); err == nil {
 		t.Error("dry-run import wrote the library")
@@ -662,6 +664,9 @@ func TestToLibraryDownloadsFileUnderArtistAndAlbum(t *testing.T) {
 	// Behave like the real downloader: create <Artist>/<Album> below the cwd.
 	n := 0
 	h.fake.Err = func(c runner.Call) error {
+		if c.Name == "beet" { // only downloaders create files
+			return nil
+		}
 		dir := filepath.Join(c.Dir, "Daft Punk", "Discovery")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -900,6 +905,9 @@ func TestToLibraryRecordsTheFolderThatWasFilled(t *testing.T) {
 	fill := func(paths ...string) {
 		n := 0
 		h.fake.Err = func(c runner.Call) error {
+			if c.Name == "beet" {
+				return nil
+			}
 			for _, p := range paths {
 				dir := filepath.Join(c.Dir, filepath.FromSlash(p))
 				if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -958,4 +966,243 @@ func TestRecordNames(t *testing.T) {
 	if a, b := recordNames("", "B", []string{"/m/X/Y", "/m/P/Q"}); a != wantArtist || b != "B" {
 		t.Errorf("ambiguous folders fall back per field: %q / %q", a, b)
 	}
+}
+
+// edit makes the fake runner behave like an editor: it overwrites the file
+// named by the last argument with content (nil content = save untouched).
+func (h *harness) edit(content *string) {
+	h.fake.Err = func(c runner.Call) error {
+		if content == nil || len(c.Args) == 0 {
+			return nil
+		}
+		return os.WriteFile(c.Args[len(c.Args)-1], []byte(*content), 0o644)
+	}
+}
+
+func strp(s string) *string { return &s }
+
+func TestImportCreateMakesEditsAndImportsTheFile(t *testing.T) {
+	h := newHarness(t)
+	dir := h.chdir(t, "Daft Punk")
+	h.edit(strp(`{"Discovery": "` + spotURL + `", "Homework": "` + ytURL + `"}`))
+
+	h.expect(t, 0, "import", "--create")
+	// The editor was opened on ./mdl.json, which was created from the sample first.
+	if c := h.fake.Calls[0]; c.Name != "vi" || c.Args[len(c.Args)-1] != "mdl.json" {
+		t.Errorf("editor call = %+v", c)
+	}
+	if !strings.Contains(h.err.String(), "Created mdl.json") {
+		t.Errorf("stderr = %q", h.err)
+	}
+	// Flat file, no --artist: the artist is the directory we are in.
+	if !strings.Contains(h.out.String(), `using "Daft Punk"`) || !strings.Contains(h.out.String(), "Imported 2 album(s)") {
+		t.Errorf("out = %q", h.out)
+	}
+	l := h.library(t)
+	if e, ok := l.Get("Daft Punk", "Discovery"); !ok || e.Spotify != spotURL {
+		t.Errorf("Discovery = %+v ok=%v", e, ok)
+	}
+	if e, _ := l.Get("Daft Punk", "Homework"); e.YouTube != ytURL {
+		t.Errorf("Homework = %+v", e)
+	}
+	// The file is kept unless --delete is given.
+	if _, err := os.Stat(filepath.Join(dir, "mdl.json")); err != nil {
+		t.Errorf("batch file should remain: %v", err)
+	}
+}
+
+func TestImportCreateSeededWithTheSample(t *testing.T) {
+	h := newHarness(t)
+	dir := h.chdir(t, "A")
+	var seen string
+	h.fake.Err = func(c runner.Call) error {
+		raw, err := os.ReadFile(c.Args[len(c.Args)-1])
+		seen = string(raw)
+		return err
+	}
+	h.expect(t, 0, "import", "-c")
+	if !strings.Contains(seen, "SAMPLE_ALBUM_NAME") || !strings.Contains(seen, "your_custom_spotify_url") {
+		t.Errorf("editor should be given the sample, got %q", seen)
+	}
+	// Saved untouched: nothing imported, and the placeholder file is cleaned up.
+	if !strings.Contains(h.out.String(), "nothing imported") {
+		t.Errorf("out = %q", h.out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mdl.json")); err == nil {
+		t.Error("an untouched sample file should be removed")
+	}
+	if _, err := os.Stat(h.libPath); err == nil {
+		t.Error("nothing should have been written to the library")
+	}
+}
+
+func TestImportCreateExistingFileIsEditedNotReplaced(t *testing.T) {
+	h := newHarness(t)
+	dir := h.chdir(t, "Abba")
+	path := filepath.Join(dir, "mdl.json")
+	existing := `{"Arrival": "` + spotURL + `"}`
+	_ = os.WriteFile(path, []byte(existing), 0o644)
+
+	h.edit(nil) // the user looks and saves without changes
+	h.expect(t, 0, "-c")
+	if got, _ := os.ReadFile(path); string(got) != existing {
+		t.Errorf("existing file must not be overwritten: %q", got)
+	}
+	if strings.Contains(h.err.String(), "Created") {
+		t.Errorf("stderr = %q", h.err)
+	}
+	// An existing file that is imported unchanged still imports (it is real data).
+	if _, ok := h.library(t).Get("Abba", "Arrival"); !ok {
+		t.Errorf("artists = %v", h.library(t).Artists())
+	}
+}
+
+func TestImportCreateSampleLeftInPlaceImportsNothing(t *testing.T) {
+	h := newHarness(t)
+	dir := h.chdir(t, "A")
+	// Edited (whitespace) but the placeholder entry is still there.
+	h.edit(strp(`  {"SAMPLE_ALBUM_NAME": "https://open.spotify.com/album/your_custom_spotify_url"}  `))
+	h.expect(t, 0, "-c")
+	if !strings.Contains(h.out.String(), "Nothing to import") {
+		t.Errorf("out = %q", h.out)
+	}
+	if _, err := os.Stat(h.libPath); err == nil {
+		t.Error("the placeholder must never reach the library")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mdl.json")); err != nil {
+		t.Error("an edited file is kept")
+	}
+}
+
+func TestImportArtistDefinedAndNot(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "Whatever Dir")
+	flat := `{"One": "` + spotURL + `"}`
+	nested := `{"Named Artist": {"Two": "` + ytURL + `"}}`
+
+	// With --artist: flat albums go under that artist, not the directory.
+	h.edit(&flat)
+	h.expect(t, 0, "-c", "-a", "Given Artist")
+	if _, ok := h.library(t).Get("Given Artist", "One"); !ok {
+		t.Errorf("artists = %v", h.library(t).Artists())
+	}
+	if strings.Contains(h.out.String(), "No --artist given") {
+		t.Errorf("no fallback note expected when an artist is given: %q", h.out)
+	}
+	// Nested file: the artists come from the file; --artist is ignored with a note.
+	_ = os.Remove("mdl.json")
+	h.edit(&nested)
+	h.expect(t, 0, "-c", "-a", "Ignored")
+	if _, ok := h.library(t).Get("Named Artist", "Two"); !ok {
+		t.Errorf("artists = %v", h.library(t).Artists())
+	}
+	if _, ok := h.library(t).Get("Ignored", "Two"); ok {
+		t.Error("--artist must not re-file a nested file")
+	}
+	if !strings.Contains(h.err.String(), "--artist ignored") {
+		t.Errorf("stderr = %q", h.err)
+	}
+	// Nested without --artist: no note at all.
+	_ = os.Remove("mdl.json")
+	h.expect(t, 0, "-c")
+	if strings.Contains(h.out.String()+h.err.String(), "artist") && strings.Contains(h.err.String(), "ignored") {
+		t.Errorf("unexpected note: %q %q", h.out, h.err)
+	}
+}
+
+func TestImportDeleteAndExplicitFile(t *testing.T) {
+	h := newHarness(t)
+	dir := h.chdir(t, "x")
+	target := filepath.Join(dir, "sub", "Some Artist", "my-albums.json")
+	_ = os.MkdirAll(filepath.Dir(target), 0o755)
+	h.edit(strp(`{"Album": "` + spotURL + `"}`))
+
+	h.expect(t, 0, "import", "-cd", target) // clustered short flags, explicit path
+	if c := h.fake.Calls[0]; c.Args[len(c.Args)-1] != target {
+		t.Errorf("editor call = %+v", c)
+	}
+	if _, ok := h.library(t).Get("Some Artist", "Album"); !ok {
+		t.Errorf("artist should be the file's directory: %v", h.library(t).Artists())
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Error("--delete should remove the file")
+	}
+	if !strings.Contains(h.out.String(), "Deleted "+target) {
+		t.Errorf("out = %q", h.out)
+	}
+
+	// Plain import of an existing file, long --delete.
+	other := filepath.Join(dir, "other.json")
+	_ = os.WriteFile(other, []byte(`{"B": "`+ytURL+`"}`), 0o644)
+	h.expect(t, 0, "import", "--delete", "-a", "Z", other)
+	if _, err := os.Stat(other); err == nil {
+		t.Error("file should be deleted")
+	}
+	// Deleting is skipped when nothing was imported?  No: an empty file is still consumed.
+	empty := filepath.Join(dir, "empty.json")
+	_ = os.WriteFile(empty, []byte(`{}`), 0o644)
+	h.expect(t, 0, "import", "-d", empty)
+	if _, err := os.Stat(empty); err == nil {
+		t.Error("an imported (empty) file should still be deleted with --delete")
+	}
+	// A failed import must keep the file.
+	bad := filepath.Join(dir, "bad.json")
+	_ = os.WriteFile(bad, []byte(`{"A": {"B": "https://example.com/x"}}`), 0o644)
+	h.expect(t, 1, "import", "-d", bad)
+	if _, err := os.Stat(bad); err != nil {
+		t.Error("a file that failed to import must not be deleted")
+	}
+}
+
+func TestImportCreateDryRunAndErrors(t *testing.T) {
+	h := newHarness(t)
+	dir := h.chdir(t, "A")
+	h.expect(t, 0, "-n", "-c")
+	if !strings.Contains(h.out.String(), "+ vi mdl.json") {
+		t.Errorf("dry run should show the editor command: %q", h.out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mdl.json")); err == nil {
+		t.Error("dry run must not create the file")
+	}
+	// Dry-run import of an existing file counts but writes nothing.
+	f := filepath.Join(dir, "f.json")
+	_ = os.WriteFile(f, []byte(`{"X": "`+spotURL+`"}`), 0o644)
+	h.expect(t, 0, "-n", "import", "-d", f)
+	if !strings.Contains(h.out.String(), "would import 1 album(s)") {
+		t.Errorf("out = %q", h.out)
+	}
+	if _, err := os.Stat(f); err != nil {
+		t.Error("dry run must not delete")
+	}
+
+	// Editor failure.
+	h.fake.Err = func(runner.Call) error { return errors.New("no editor") }
+	h.expect(t, 1, "-c")
+	// Cannot create the file (parent does not exist).
+	h.fake.Err = nil
+	h.expect(t, 1, "import", "-c", filepath.Join(dir, "missing-dir", "x.json"))
+	// Usage errors.
+	h.expect(t, 2, "import")
+	h.expect(t, 2, "import", "a.json", "b.json")
+	h.expect(t, 1, "import", filepath.Join(dir, "nope.json"))
+	_ = os.MkdirAll(filepath.Dir(h.libPath), 0o755)
+	_ = os.WriteFile(h.libPath, []byte("{bad"), 0o644)
+	h.expect(t, 1, "import", f)
+}
+
+func TestMdlDashCIsShorthandForImportCreate(t *testing.T) {
+	h := newHarness(t)
+	h.chdir(t, "Artist")
+	h.edit(strp(`{"A": "` + spotURL + `"}`))
+	h.expect(t, 0, "-c")
+	h.expect(t, 0, "-c", "-a", "Other")
+	h.expect(t, 0, "-n", "-c")
+	h.expect(t, 0, "-L", filepath.Join(h.dir, "l2.json"), "-c", "named.json")
+	if _, err := os.Stat("named.json"); err != nil {
+		t.Errorf("-c FILE should create FILE: %v", err)
+	}
+	// Not hijacked: a command name or URL after -c is something else.
+	h.expect(t, 2, "-c", "bogus", "extra")
+	h.expect(t, 2, "-c", "-s")   // -s is not an import option
+	h.expect(t, 2, "-c", "list") // -c belongs to import, not list
 }

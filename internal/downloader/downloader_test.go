@@ -474,3 +474,17 @@ func TestNamesFromDir(t *testing.T) {
 		t.Errorf("top-level dir gave %q / %q", artist, album)
 	}
 }
+
+func TestNameOfDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Daft Punk")
+	if name, ok := NameOfDir(dir); !ok || name != "Daft Punk" {
+		t.Errorf("got %q %v", name, ok)
+	}
+	wd, _ := os.Getwd()
+	if name, ok := NameOfDir("."); !ok || name != filepath.Base(wd) {
+		t.Errorf("'.' gave %q %v", name, ok)
+	}
+	if name, ok := NameOfDir(string(filepath.Separator)); ok || name != "" {
+		t.Errorf("root gave %q %v", name, ok)
+	}
+}
