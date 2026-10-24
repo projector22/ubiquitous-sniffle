@@ -63,18 +63,18 @@ func Quote(s string) string {
 	if s == "" {
 		return "''"
 	}
-	safe := true
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
-			strings.ContainsRune("_@%+=:,./-", r)) {
-			safe = false
-			break
+		if !isShellSafe(r) {
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 		}
 	}
-	if safe {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return s
+}
+
+// isShellSafe reports whether r needs no quoting in a shell word.
+func isShellSafe(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' ||
+		strings.ContainsRune("_@%+=:,./-", r)
 }
 
 // Call records one invocation made through a Fake.

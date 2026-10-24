@@ -1,0 +1,17 @@
+# golangci-lint v2 configuration. Run locally with `make lint`.
+version: "2"
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  settings:
+    errcheck:
+      # Writing to a terminal or in-memory buffer: nothing useful to do on error.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+formatters:
+  enable:
+    - gofmt
