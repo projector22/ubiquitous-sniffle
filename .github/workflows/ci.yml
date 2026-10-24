@@ -1,0 +1,45 @@
+name: CI
+
+# Test every pull request (Dependabot's included). Releases are built by
+# release.yml when a version tag is pushed.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # gofmt, go mod tidy check, go vet (Linux + Windows), race tests, coverage gate
+      - name: Check
+        run: make check
+      - name: Cross-compile every release target
+        if: matrix.os == 'ubuntu-latest'
+        run: make build-all
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15

@@ -100,7 +100,7 @@ vet: ## Run go vet (also for Windows, where the TUI is stubbed)
 	$(GO) vet ./...
 	GOOS=windows $(GO) vet ./...
 
-lint: ## Run golangci-lint (if installed) in addition to vet
+lint: ## Run golangci-lint (if installed); config in .golangci.yml
 	@command -v golangci-lint >/dev/null 2>&1 \
 	  && golangci-lint run ./... \
 	  || echo "golangci-lint not installed; skipping (https://golangci-lint.run)"
@@ -112,7 +112,7 @@ tidy-check: ## Fail if go.mod / go.sum are not tidy (commit the result of `make 
 	@$(GO) mod tidy
 	@git diff --exit-code -- go.mod go.sum >/dev/null 2>&1 || { echo "go.mod/go.sum are not tidy: run 'make tidy' and commit"; exit 1; }
 
-check: fmt-check tidy-check vet test-race cover-check ## Everything CI runs on every commit
+check: fmt-check tidy-check vet test-race cover-check ## Everything CI runs on every pull request
 
 ci: check build ## Alias used by CI: check, then build
 
