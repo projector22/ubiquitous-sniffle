@@ -69,8 +69,8 @@ metadata said. The entry is filed under:
 
 1. `-a ARTIST` / `-A ALBUM`, if you gave them;
 2. with `-t`, the `<Artist>/<Album>` folder the download actually filled (when it produced exactly one);
-3. otherwise **the directory you ran mdl in**: its name is the album and the name of the directory above it
-   is the artist.
+3. otherwise **the directory the files were downloaded into** (the one you ran mdl in, or the one given with
+   `-m`): its name is the album and the name of the directory above it is the artist.
 
 Each of artist and album is resolved separately, so `-A "Homework"` alone still takes the artist from the
 directory above. For example, in `~/Music/Daft Punk/Discovery`:
@@ -110,8 +110,8 @@ short flags combine (`-sb`), and values can be attached (`--artist=NAME`, `-aNAM
 ### Batch files: `mdl -c`
 
 For adding several albums at once, `-c` (the old `spotdll.py -c`) makes a small JSON file, opens it in your
-editor, and imports it into the library when you close the editor. Nothing is downloaded; run `mdl download`
-afterwards.
+editor, and imports it into the library when you close the editor. Creating and importing downloads nothing;
+see [Downloading a batch file](#downloading-a-batch-file) for that.
 
 ```sh
 cd ~/Music/Daft\ Punk
@@ -139,7 +139,33 @@ The file can have either shape, and mdl works out which:
 Details: the sample is a single placeholder album, and mdl ignores that placeholder, so saving the sample
 untouched imports nothing (a freshly created file left untouched is removed again). Links are classified as
 Spotify or YouTube automatically; anything else is an error and nothing from that file is imported. Existing
-albums are updated, never removed. `mdl import FILE` does the import without opening an editor.
+albums are updated, never removed. `mdl import FILE` does the import without opening an editor, and plain
+`mdl import` takes `./mdl.json`.
+
+#### Downloading a batch file
+
+Run plain `mdl` in a directory that has a `mdl.json` and it downloads the albums in it, just as `spotdll.py` did:
+
+```sh
+cd ~/Music/Daft\ Punk
+mdl                       # download ./mdl.json
+mdl -b                    # ...and run beet on each album folder afterwards
+mdl -m ~/Music/Abba       # use ~/Music/Abba/mdl.json instead, and download into ~/Music/Abba
+mdl -f albums.json -d     # a batch file anywhere (--file); delete it once everything succeeded (--delete)
+mdl                       # without a mdl.json, you just get the help screen
+```
+
+- **Where albums go:** a single-artist file (`{"Album": "url"}`) is for one artist's folder, so the directory
+  holding the file *is* the artist's folder and each album goes into `<dir>/<Album>/`. A file with artists
+  (`{"Artist": {"Album": "url"}}`) uses `<dir>/<Artist>/<Album>/` below that directory. Albums are downloaded
+  in the order they appear in the file.
+- **Which tool:** each URL gets the tool for its own link (Spotify → spotdl, YouTube → yt-dlp), so a file may mix
+  both freely. `-s` / `--spotify` or `-y` / `--youtube` forces one tool for every URL instead.
+- **Recorded too:** like every download, each album that succeeds is recorded in the library (artist from the file,
+  `-a`, or the directory's name; `-N` turns that off). A failed album does not stop the others and is not recorded.
+- **`-m DIR`** is the target directory: it is where `mdl.json` is read from and downloaded into, and where
+  `mdl import` / `mdl -c` look for and create it (a `-m` directory that does not exist yet is created by `-c`).
+  `$MDL_MUSIC_DIR` is not used for this; it is only the root of the `Artist/Album` layout.
 
 ### Folder layout
 
@@ -173,7 +199,7 @@ Each album needs at least one link. When it has both, Spotify is used unless you
 Unknown keys are rejected, so a typo like `"youtbe"` is reported instead of ignored.
 
 Location: `-L FILE`, else `$MDL_LIBRARY`, else `~/.config/mdl/library.json`.
-Music directory for the `Artist/Album` layout: `-m DIR`, else `$MDL_MUSIC_DIR`, else the current directory. Plain URL downloads ignore `$MDL_MUSIC_DIR` and use the current directory unless `-m` is given.
+Music directory for the `Artist/Album` layout: `-m DIR`, else `$MDL_MUSIC_DIR`, else the current directory. Plain URL downloads and batch files ignore `$MDL_MUSIC_DIR` and use the current directory unless `-m` is given; then `-m` is also the directory whose name decides the artist and album a plain URL is recorded under.
 
 ### Configuration
 
@@ -226,6 +252,19 @@ mdl import path/to/single-artist.json                    # same, artist = name o
 mdl import path/to/multi-artist.json                     # {"Artist": {"Album": "url"}}
 ```
 
+The Python script also kept a master log of everything it had downloaded, `~/.spotdll/log.json`, shaped
+`{"Artist": {"Album": "url"}}`. Bring it into the library with:
+
+```sh
+mdl import --spotdll-log                 # or -l; reads ~/.spotdll/log.json
+mdl import -l /path/to/log.json          # if you moved it
+mdl -n import -l                         # dry run: see how many albums it would import
+```
+
+Years of logging leave odd entries (links that are neither Spotify nor YouTube, albums without an artist), so
+this import is forgiving: anything unusable is skipped and listed with the reason, and the rest is imported.
+Importing the log twice is harmless; existing albums are updated, not duplicated.
+
 | Old | New |
 | --- | --- |
 | `script.sh -c` / `-d` (edit JSON) | `mdl -c` (edit + import), `mdl edit`, `mdl add`, `mdl tui` |
@@ -234,6 +273,9 @@ mdl import path/to/multi-artist.json                     # {"Artist": {"Album": 
 | `script.sh -s URL`, `-y URL` | `mdl -s URL`, `mdl -y URL` |
 | `script.sh -b URL` | `mdl -b URL` |
 | (new) file a random URL under Artist/Album | `mdl -t URL` |
+| `spotdll.py` with a `spotdll.json` | `mdl` with a `mdl.json` (`mdl -f FILE`, `-d` to delete it afterwards) |
+| `spotdll.py -c` | `mdl -c` |
+| `~/.spotdll/log.json` | `mdl import --spotdll-log` |
 | `.source` file | removed: use `mdl download URL...` (or a shell alias) |
 
 ## Development
@@ -290,9 +332,9 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 - [x] Dependabot and CI.
 - [x] Choose default editor, not just vi
 - [x] Generate an edit file with -c. Import with and without artist defined
-  - [ ] The default behaviour for running mdl without arguments if a mdl.json is present, is to download on it.
-  - [ ] The flags to force Youtube or Spotify should be respected.
-  - [ ] otherwise mdl should use the correct tool depending on the url, and switch if urls are mixed
-- [ ] -m should use the targetted path for import data.
-- [ ] Import for old spotdll
+  - [x] The default behaviour for running mdl without arguments if a mdl.json is present, is to download on it.
+  - [x] The flags to force Youtube or Spotify should be respected.
+  - [x] otherwise mdl should use the correct tool depending on the url, and switch if urls are mixed
+- [x] -m should use the targetted path for import data.
+- [x] Import for old spotdll
 - [ ] Implement for easy go distribution

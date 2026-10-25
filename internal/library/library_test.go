@@ -353,3 +353,103 @@ func TestImportBatchReportsWhetherTheDefaultArtistWasUsed(t *testing.T) {
 		t.Errorf("nested: used=%v err=%v", used, err)
 	}
 }
+
+func TestParseBatchKeepsFileOrder(t *testing.T) {
+	entries, err := ParseBatch([]byte(`{
+		"Zebra": {"Z2": "https://youtu.be/z2", "Z1": "https://youtu.be/z1"},
+		"Loose B": "https://open.spotify.com/album/b",
+		"Alpha": {"A1": "https://open.spotify.com/album/a1"},
+		"Loose A": "https://open.spotify.com/album/a"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range entries {
+		got = append(got, e.Artist+"|"+e.Album)
+	}
+	want := []string{"Zebra|Z2", "Zebra|Z1", "|Loose B", "Alpha|A1", "|Loose A"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+	if entries[0].Entry.YouTube == "" || entries[2].Entry.Spotify == "" {
+		t.Errorf("links lost: %+v", entries)
+	}
+}
+
+func TestParseBatchStrictErrorsAndEdgeCases(t *testing.T) {
+	// Placeholders and artists without albums are dropped without complaint.
+	entries, err := ParseBatch([]byte(`{"` + SampleAlbum + `": "` + SampleURL + `", "Empty": null, "A": {"X": "` + SampleURL + `"}}`))
+	if err != nil || len(entries) != 0 {
+		t.Errorf("entries=%v err=%v", entries, err)
+	}
+	for name, tc := range map[string]struct{ in, want string }{
+		"not an object":  {`[1]`, "not a JSON object"},
+		"scalar":         {`5`, "not a JSON object"},
+		"truncated":      {`{"A": {"B": "https://youtu.be/x"`, "not a JSON object"},
+		"trailing data":  {`{} {}`, "unexpected data"},
+		"bad url":        {`{"A": {"B": "nope"}}`, "A / B"},
+		"unsupported":    {`{"A": 5}`, `"A": unsupported value`},
+		"nested object":  {`{"A": {"B": {"spotify": "x"}}}`, "already in the new format"},
+		"flat bad host":  {`{"B": "https://example.com"}`, "neither a Spotify nor a YouTube"},
+		"unsupported 2":  {`{"A": [1]}`, "unsupported value"},
+		"empty document": {``, "not a JSON object"},
+	} {
+		if _, err := ParseBatch([]byte(tc.in)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want containing %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestParseLogIsLenient(t *testing.T) {
+	entries, skipped, err := ParseLog([]byte(`{
+		"Daft Punk": {"Discovery": "https://open.spotify.com/album/a", "Bad": "https://example.com/x"},
+		"Abba": {"Arrival": {"spotify": "x"}, "Waterloo": "https://youtu.be/w"},
+		"Loose": "https://open.spotify.com/album/l",
+		"Number": 5,
+		"Nothing": null,
+		"Placeholder": {"Sample": "` + SampleURL + `"},
+		"Last": {"Fine": "https://youtu.be/f"}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range entries {
+		got = append(got, e.Artist+"|"+e.Album)
+	}
+	if want := "Daft Punk|Discovery,Abba|Waterloo,Last|Fine"; strings.Join(got, ",") != want {
+		t.Errorf("entries = %v, want %s", got, want)
+	}
+	reasons := map[string]string{}
+	for _, s := range skipped {
+		reasons[s.Where] = s.Reason
+	}
+	if len(skipped) != 4 {
+		t.Fatalf("skipped = %+v", skipped)
+	}
+	for where, want := range map[string]string{
+		"Daft Punk / Bad": "neither a Spotify nor a YouTube",
+		"Abba / Arrival":  "expected a URL string",
+		"Loose":           "no artist",
+		"Number":          "unsupported value",
+	} {
+		if !strings.Contains(reasons[where], want) {
+			t.Errorf("reason for %q = %q, want containing %q", where, reasons[where], want)
+		}
+	}
+	// A file that is not an object at all is still an error.
+	if _, _, err := ParseLog([]byte(`[]`)); err == nil {
+		t.Error("expected an error for a non-object log")
+	}
+}
+
+func TestImportBatchStillNeedsAnArtistForFlatFiles(t *testing.T) {
+	if _, _, err := ImportBatch([]byte(`{"Album": "https://youtu.be/x"}`), " "); err == nil || !strings.Contains(err.Error(), "--artist") {
+		t.Errorf("err = %v", err)
+	}
+	lib, used, err := ImportBatch([]byte(`{"Album": "https://youtu.be/x", "Other": {"Two": "https://youtu.be/y"}}`), "Given")
+	if err != nil || !used || lib.NumAlbums() != 2 || lib.NumArtists() != 2 {
+		t.Errorf("mixed shapes: used=%v err=%v lib=%v", used, err, lib)
+	}
+}

@@ -115,6 +115,10 @@ func (a *App) commands() []command {
 				"links, yt-dlp for YouTube links. This is also what plain `mdl URL` does, so `download` can be left out. " +
 				"Add --to-library to file URL downloads into the music library instead, under the artist if the tracks " +
 				"say who it is and under \"Unknown Artist\" if not. " +
+				"With --file (or plain `mdl` in a directory that has a mdl.json) the albums of a batch file are downloaded " +
+				"instead: a single-artist file into <dir>/<Album>/, where <dir> is the directory the file is in and is " +
+				"taken to be the artist's folder, a multi-artist file into <dir>/<Artist>/<Album>/. --music-dir sets that " +
+				"directory. Each URL gets the tool matching its host, so Spotify and YouTube links may be mixed. " +
 				"Every URL that downloads successfully is also recorded in the library file (see --no-import), under " +
 				"--artist/--album if given, else the folder --to-library filled, else the album named after the directory " +
 				"you ran mdl in and the artist named after the directory above it. " +
@@ -123,6 +127,8 @@ func (a *App) commands() []command {
 				"--spotify or --youtube. A failed album does not stop the rest.",
 			Opts: append(append([]Opt{}, downloadOpts...),
 				Opt{'t', "to-library", "", "For URLs: file the download under <music-dir>/<Artist>/<Album>/ instead of the current directory. Artist and album come from the tracks' metadata; missing ones become \"Unknown Artist\" / \"Unknown Album\". With --beet only the new album folders are imported."},
+				Opt{'f', "file", "FILE", "Download the albums listed in a batch file (see `mdl import`) instead of the library: {\"Album\": \"url\"} for one artist, whose folder is the directory the file is in, or {\"Artist\": {\"Album\": \"url\"}}. Each URL uses the right tool for its host unless --spotify or --youtube forces one. Plain `mdl` does this for ./mdl.json when it exists."},
+				Opt{'d', "delete", "", "With --file: delete the batch file once every album has downloaded successfully."},
 				Opt{'N', "no-import", "", "Do not record downloaded URLs in the library file. By default every URL you download is recorded there."},
 				Opt{'a', "artist", "NAME", "Library downloads: only this artist's albums (case-insensitive). With URLs: the artist the download is recorded under (and, with --to-library, the artist folder)."},
 				Opt{'A', "album", "NAME", "Library downloads: only albums with this name (case-insensitive). With URLs: the album the download is recorded under (and, with --to-library, the album folder)."}),
@@ -131,6 +137,9 @@ func (a *App) commands() []command {
 				`mdl download -a "Daft Punk" -A Discovery`,
 				"mdl download -yb https://music.youtube.com/playlist?list=...",
 				"mdl https://open.spotify.com/album/...",
+				"mdl                                      download ./mdl.json, if there is one",
+				"mdl -m ~/Music/Abba                      download ~/Music/Abba/mdl.json into that folder",
+				"mdl download --file albums.json -d       download a batch file, then delete it",
 				"mdl -t https://music.youtube.com/playlist?list=...",
 				`mdl -t -a "Daft Punk" -A Discovery https://youtu.be/...`,
 			},
@@ -210,11 +219,14 @@ func (a *App) commands() []command {
 				"Without --create, FILE must already exist. A single-artist file does not say whose albums they are: " +
 				"they are filed under --artist if given, otherwise under the name of the directory the file is in. " +
 				"A file with its own artists ignores --artist. Existing albums are updated, never removed. " +
-				"With --create the editor is chosen as for `mdl edit` (see `mdl config`).",
+				"With --create the editor is chosen as for `mdl edit` (see `mdl config`). " +
+				"With no FILE, ./mdl.json is used (or <--music-dir>/mdl.json). --spotdll-log imports the master log " +
+				"({\"Artist\": {\"Album\": \"url\"}}) that the old Python script kept in ~/.spotdll/log.json.",
 			Opts: []Opt{
 				{'c', "create", "", "Create FILE from a sample (or edit it if it exists) in your editor, then import it. Saving the sample untouched imports nothing."},
 				{'a', "artist", "NAME", "Artist for a single-artist file. Default: the name of the directory containing FILE."},
 				{'d', "delete", "", "Delete FILE after it has been imported successfully."},
+				{'l', "spotdll-log", "", "Import the old spotdll script's master log (FILE, default ~/.spotdll/log.json) instead of a batch file. Unusable old entries are skipped and listed."},
 				editorOpt,
 			},
 			Examples: []string{
@@ -223,6 +235,8 @@ func (a *App) commands() []command {
 				"mdl import -cd ~/Music/Abba/abba.json    edit and import that file, then delete it",
 				"mdl import ~/Music/Daft\\ Punk/mdl.json    import an existing file (artist: Daft Punk, from the directory)",
 				`mdl import old/mdl.json -a "Some Artist"`,
+				"mdl import --spotdll-log                  import the old script's ~/.spotdll/log.json",
+				"mdl -m ~/Music/Abba -c                   edit and import ~/Music/Abba/mdl.json",
 			},
 			run: a.cmdImport,
 		},
@@ -300,6 +314,14 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runCommand(ctx, imp, newValues(), args)
 	}
 
+	// Plain `mdl` downloads ./mdl.json when there is one (the original
+	// script's normal mode); `mdl -f FILE` names another batch file.
+	if dl, g, code, handled := a.implicitBatch(args); handled {
+		return code
+	} else if dl != nil {
+		return a.runCommand(ctx, dl, g, args)
+	}
+
 	globals, rest, err := parse(globalOpts, args, true)
 	if err != nil {
 		return a.usageErr(err)
@@ -337,6 +359,56 @@ func (a *App) implicitDownload(args []string) *command {
 		return nil
 	}
 	return dl
+}
+
+// implicitBatch handles invocations made only of download options: no
+// command, no URL. With a batch file (named by --file, or <target
+// directory>/mdl.json) it returns the download command and the options to run
+// it with. Otherwise, if download-only options such as -s were given, the
+// request cannot be met and handled is true with the exit code to return, so
+// the user is told so instead of seeing "unknown option". Options shared with
+// every command (-n, -L, ...) alone fall through to the plain help screen.
+func (a *App) implicitBatch(args []string) (dl *command, g *Values, code int, handled bool) {
+	dl = a.find("download")
+	specs := append(append([]Opt{}, dl.Opts...), globalOpts...)
+	vals, rest, err := parse(specs, args, true)
+	if err != nil || len(rest) > 0 {
+		return nil, nil, 0, false
+	}
+	downloadOnly := false
+	for _, o := range dl.Opts {
+		if vals.Has(o.Long) {
+			downloadOnly = true
+		}
+	}
+	switch {
+	case vals.Bool("help"), vals.Bool("version"):
+		if downloadOnly { // `mdl -s -h`: the help request wins over everything
+			if vals.Bool("help") {
+				fmt.Fprint(a.Stdout, a.topHelp())
+			} else {
+				fmt.Fprintf(a.Stdout, "mdl %s\n", a.Version)
+			}
+			return nil, nil, exitOK, true
+		}
+		return nil, nil, 0, false
+	case vals.Has("file"):
+		return dl, newValues(), 0, false
+	}
+	dir := vals.String("music-dir")
+	if dir == "" {
+		dir = "."
+	}
+	path := filepath.Join(dir, defaultBatchFile)
+	if fileExists(path) {
+		g = newValues()
+		g.m["file"] = []string{path}
+		return dl, g, 0, false
+	}
+	if downloadOnly {
+		return nil, nil, a.usageErr(fmt.Errorf("nothing to download: there is no %s (give URLs, a command, or --file)", path)), true
+	}
+	return nil, nil, 0, false
 }
 
 // implicitCreate returns the import command when args are `[options] -c
@@ -452,6 +524,21 @@ func (a *App) cmdDownload(inv *invocation) int {
 	}
 
 	toLibrary := inv.vals.Bool("to-library")
+	file := inv.vals.String("file")
+	switch {
+	case file != "":
+		switch {
+		case len(inv.args) > 0:
+			return a.usageErr(errors.New("--file cannot be combined with URLs"))
+		case toLibrary:
+			return a.usageErr(errors.New("--to-library only applies to URLs, not to --file"))
+		case inv.vals.Has("album"):
+			return a.usageErr(errors.New("--album does not apply to --file; the batch file names its albums"))
+		}
+		return a.downloadBatch(inv, file, forced)
+	case inv.vals.Bool("delete"):
+		return a.usageErr(errors.New("--delete only applies with --file"))
+	}
 	if len(inv.args) > 0 {
 		return a.downloadURLs(inv, forced, toLibrary)
 	}
@@ -481,6 +568,14 @@ func (a *App) downloadURLs(inv *invocation, forced downloader.Tool, toLibrary bo
 	}
 	if toLibrary {
 		root = inv.musicDir
+	}
+	// The directory whose names stand in for a missing artist/album: where
+	// the files land (the -m target, else the current directory). With
+	// --to-library the library root says nothing about one album, so the
+	// directory mdl was run in is used instead.
+	fallbackDir := root
+	if toLibrary {
+		fallbackDir = "."
 	}
 	dl := a.newDownloader(inv, root)
 	failed, seen := false, map[string]bool{}
@@ -512,7 +607,7 @@ func (a *App) downloadURLs(inv *invocation, forced downloader.Tool, toLibrary bo
 			if _, cerr := library.ClassifyURL(u); cerr != nil {
 				// Downloaded fine, but only Spotify / YouTube links can be stored.
 				fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", cerr)
-			} else if err := a.recordURL(inv, u, landed, toLibrary); err != nil {
+			} else if err := a.recordURL(inv, u, landed, toLibrary, fallbackDir); err != nil {
 				fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", err)
 				failed = true
 			}
@@ -527,12 +622,13 @@ func (a *App) downloadURLs(inv *invocation, forced downloader.Tool, toLibrary bo
 //  1. --artist / --album;
 //  2. with --to-library, the folder the downloader actually filled, when it
 //     produced exactly one (<Artist>/<Album>);
-//  3. the directory mdl was run in: its name is the album and the name of
-//     the directory above it is the artist.
+//  3. the fallback directory (where the files landed: --music-dir, else the
+//     directory mdl was run in): its name is the album and the name of the
+//     directory above it is the artist.
 //
 // Each of artist and album is resolved independently, so the library gets an
 // entry no matter what the metadata lookup found.
-func recordNames(flagArtist, flagAlbum string, landed []string) (artist, album string) {
+func recordNames(flagArtist, flagAlbum string, landed []string, fallbackDir string) (artist, album string) {
 	artist, album = flagArtist, flagAlbum
 	if len(landed) == 1 {
 		if artist == "" {
@@ -543,7 +639,7 @@ func recordNames(flagArtist, flagAlbum string, landed []string) (artist, album s
 		}
 	}
 	if artist == "" || album == "" {
-		dirArtist, dirAlbum := downloader.NamesFromDir(".")
+		dirArtist, dirAlbum := downloader.NamesFromDir(fallbackDir)
 		if artist == "" {
 			artist = dirArtist
 		}
@@ -556,7 +652,7 @@ func recordNames(flagArtist, flagAlbum string, landed []string) (artist, album s
 
 // recordURL stores rawURL (a Spotify or YouTube link) in the library file
 // under the names chosen by recordNames.
-func (a *App) recordURL(inv *invocation, rawURL string, landed []string, toLibrary bool) error {
+func (a *App) recordURL(inv *invocation, rawURL string, landed []string, toLibrary bool, fallbackDir string) error {
 	var entry library.Entry
 	if err := entry.SetURL(rawURL); err != nil {
 		return err
@@ -564,8 +660,13 @@ func (a *App) recordURL(inv *invocation, rawURL string, landed []string, toLibra
 	if !toLibrary {
 		landed = nil
 	}
-	artist, album := recordNames(inv.vals.String("artist"), inv.vals.String("album"), landed)
+	artist, album := recordNames(inv.vals.String("artist"), inv.vals.String("album"), landed, fallbackDir)
+	return a.storeEntry(inv, artist, album, entry)
+}
 
+// storeEntry adds entry to the library file under artist / album (or, in a
+// dry run, says that it would).
+func (a *App) storeEntry(inv *invocation, artist, album string, entry library.Entry) error {
 	lib, err := library.LoadOrNew(inv.libPath)
 	if err != nil {
 		return err
@@ -591,6 +692,99 @@ func (a *App) recordURL(inv *invocation, rawURL string, landed []string, toLibra
 	}
 	fmt.Fprintf(a.Stdout, "Recorded %s / %s in %s\n", artist, album, inv.libPath)
 	return nil
+}
+
+// downloadBatch downloads the albums of a batch file. The directory holding
+// the file is the target: a single-artist file's albums go straight into it
+// (it is that artist's folder), a multi-artist file's into <dir>/<Artist>/
+// <Album>. Every album that downloads is recorded in the library.
+func (a *App) downloadBatch(inv *invocation, path string, forced downloader.Tool) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return a.fail("%v", err)
+	}
+	entries, err := library.ParseBatch(data)
+	if err != nil {
+		return a.fail("%s: %v", path, err)
+	}
+	dir := filepath.Dir(path)
+	artist := a.defaultArtist(inv, dir)
+
+	items := make([]downloader.Item, 0, len(entries))
+	usedDefault := false
+	for _, e := range entries {
+		it := downloader.Item{Artist: e.Artist, Album: e.Album, URL: e.Entry.Spotify}
+		if it.URL == "" {
+			it.URL = e.Entry.YouTube
+		}
+		if e.Artist == "" {
+			usedDefault = true
+			it.Artist = artist
+			it.Dir = filepath.Join(dir, downloader.SanitizeName(e.Album))
+		} else {
+			it.Dir = downloader.AlbumDir(dir, e.Artist, e.Album)
+		}
+		items = append(items, it)
+	}
+	a.noteArtist(inv, path, artist, usedDefault)
+	if len(items) == 0 {
+		fmt.Fprintf(a.Stdout, "Nothing to download in %s.\n", path)
+		return exitOK
+	}
+
+	results := a.newDownloader(inv, dir).DownloadItems(inv.ctx, items, forced)
+	failed := len(results) < len(items) // stopped early by cancellation
+	var dirs []string
+	for _, r := range results {
+		if r.Err != nil {
+			failed = true
+			fmt.Fprintf(a.Stderr, "mdl: %s / %s: %v\n", r.Item.Artist, r.Item.Album, r.Err)
+			continue
+		}
+		dirs = append(dirs, r.Item.Dir)
+		if inv.vals.Bool("no-import") {
+			continue
+		}
+		var entry library.Entry
+		_ = entry.SetURL(r.Item.URL) // already classified by ParseBatch
+		if err := a.storeEntry(inv, r.Item.Artist, r.Item.Album, entry); err != nil {
+			fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", err)
+			failed = true
+		}
+	}
+	if !failed && inv.vals.Bool("delete") && !inv.dry {
+		if err := os.Remove(path); err != nil {
+			fmt.Fprintf(a.Stderr, "mdl: deleting %s: %v\n", path, err)
+			failed = true
+		} else {
+			fmt.Fprintf(a.Stdout, "Deleted %s\n", path)
+		}
+	}
+	return a.finish(inv, dirs, failed)
+}
+
+// defaultArtist is the artist for the albums of a single-artist batch file in
+// dir: --artist, else the name of dir (the artist's folder), else "Unknown
+// Artist".
+func (a *App) defaultArtist(inv *invocation, dir string) string {
+	if v := inv.vals.String("artist"); v != "" {
+		return v
+	}
+	if name, ok := downloader.NameOfDir(dir); ok {
+		return name
+	}
+	return downloader.UnknownArtist
+}
+
+// noteArtist tells the user how the artist of a single-artist file was
+// decided, or that --artist had no effect on a file that names its artists.
+func (a *App) noteArtist(inv *invocation, path, artist string, usedDefault bool) {
+	switch {
+	case usedDefault && !inv.vals.Has("artist"):
+		fmt.Fprintf(a.Stdout, "No --artist given: using %q, the name of the directory containing %s, as the artist.\n", artist, path)
+	case !usedDefault && inv.vals.Has("artist"):
+		fmt.Fprintf(a.Stderr, "mdl: --artist ignored: %s names its own artists\n", path)
+	}
 }
 
 func (a *App) newDownloader(inv *invocation, root string) *downloader.Downloader {
@@ -773,29 +967,63 @@ func (a *App) cmdEdit(inv *invocation) int {
 }
 
 func (a *App) cmdImport(inv *invocation) int {
-	create := inv.vals.Bool("create")
+	create, oldLog := inv.vals.Bool("create"), inv.vals.Bool("spotdll-log")
+	if create && oldLog {
+		return a.usageErr(errors.New("import: --create and --spotdll-log cannot be combined"))
+	}
 	var path string
 	switch {
 	case len(inv.args) > 1:
 		return a.usageErr(errors.New("import: expected at most one FILE"))
 	case len(inv.args) == 1:
 		path = inv.args[0]
+	case oldLog:
+		path = filepath.Join(a.Home, ".spotdll", "log.json")
 	case create:
-		path = defaultBatchFile
+		path = batchPath(inv)
 	default:
-		return a.usageErr(errors.New("import: expected a FILE (or use --create to make one)"))
+		// Plain `mdl import` takes the batch file of the target directory.
+		path = batchPath(inv)
+		if !fileExists(path) {
+			return a.usageErr(fmt.Errorf("import: expected a FILE (there is no %s; use --create to make one, or --spotdll-log for the old spotdll log)", path))
+		}
 	}
 	if create {
+		// A --music-dir that does not exist yet is created, so `mdl -m NEW -c` just works.
+		if len(inv.args) == 0 && inv.vals.Has("music-dir") && !inv.dry {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return a.fail("%v", err)
+			}
+		}
 		if code, proceed := a.editBatchFile(inv, path); !proceed {
 			return code
 		}
 	}
+	if oldLog {
+		return a.importSpotdllLog(inv, path)
+	}
 	return a.importBatchFile(inv, path)
 }
 
-// defaultBatchFile is where `mdl -c` creates the batch file, like the
-// spotdll.json of the original Python version.
+// defaultBatchFile is the batch file `mdl -c` creates and plain `mdl`
+// downloads, like the spotdll.json of the original Python version.
 const defaultBatchFile = "mdl.json"
+
+// targetDir is the directory batch files are looked for in and downloaded
+// into: --music-dir when given, else the current directory. ($MDL_MUSIC_DIR
+// is deliberately not consulted: it is the root of the Artist/Album layout,
+// not of one artist's batch file.)
+func targetDir(inv *invocation) string {
+	if d := inv.vals.String("music-dir"); d != "" {
+		return d
+	}
+	return "."
+}
+
+// batchPath is the default batch file: <target directory>/mdl.json.
+func batchPath(inv *invocation) string {
+	return filepath.Join(targetDir(inv), defaultBatchFile)
+}
 
 // editBatchFile implements --create: make the file from the sample when it
 // does not exist, open it in the editor, and report whether the caller should
@@ -837,24 +1065,49 @@ func (a *App) importBatchFile(inv *invocation, path string) int {
 	if err != nil {
 		return a.fail("%v", err)
 	}
-	artist := inv.vals.String("artist")
-	if artist == "" {
-		artist = downloader.UnknownArtist
-		if name, ok := downloader.NameOfDir(filepath.Dir(path)); ok {
-			artist = name
-		}
-	}
+	artist := a.defaultArtist(inv, filepath.Dir(path))
 	imported, usedDefault, err := library.ImportBatch(data, artist)
 	if err != nil {
 		return a.fail("%s: %v", path, err)
 	}
-	switch {
-	case usedDefault && !inv.vals.Has("artist"):
-		fmt.Fprintf(a.Stdout, "No --artist given: using %q, the name of the directory containing %s, as the artist.\n", artist, path)
-	case !usedDefault && inv.vals.Has("artist"):
-		fmt.Fprintf(a.Stderr, "mdl: --artist ignored: %s names its own artists\n", path)
-	}
+	a.noteArtist(inv, path, artist, usedDefault)
+	return a.mergeIntoLibrary(inv, imported, path, "")
+}
 
+// importSpotdllLog imports the old Python script's master log
+// ({"Artist": {"Album": "url"}}, by default ~/.spotdll/log.json). Entries that
+// can no longer be used are skipped and listed rather than failing the lot.
+func (a *App) importSpotdllLog(inv *invocation, path string) int {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return a.fail("no spotdll log at %s (the old script kept it at ~/.spotdll/log.json; pass the file's path if it moved)", path)
+	}
+	if err != nil {
+		return a.fail("%v", err)
+	}
+	entries, skipped, err := library.ParseLog(data)
+	if err != nil {
+		return a.fail("%s: %v", path, err)
+	}
+	imported := library.New()
+	for _, e := range entries {
+		if err := imported.Add(e.Artist, e.Album, e.Entry); err != nil {
+			skipped = append(skipped, library.Skipped{Where: e.Artist + " / " + e.Album, Reason: err.Error()})
+		}
+	}
+	for _, s := range skipped {
+		fmt.Fprintf(a.Stderr, "mdl: skipped %s: %s\n", s.Where, s.Reason)
+	}
+	extra := ""
+	if len(skipped) > 0 {
+		extra = fmt.Sprintf(" (%d skipped)", len(skipped))
+	}
+	return a.mergeIntoLibrary(inv, imported, path, extra)
+}
+
+// mergeIntoLibrary adds imported to the library file, honouring --dry-run and
+// --delete, and reports what happened. extra is appended to the summary.
+func (a *App) mergeIntoLibrary(inv *invocation, imported *library.Library, path, extra string) int {
 	lib, err := library.LoadOrNew(inv.libPath)
 	if err != nil {
 		return a.fail("%v", err)
@@ -865,15 +1118,15 @@ func (a *App) importBatchFile(inv *invocation, path string) int {
 	}
 	switch {
 	case inv.dry:
-		fmt.Fprintf(a.Stdout, "would import %d album(s) into %s\n", n, inv.libPath)
+		fmt.Fprintf(a.Stdout, "would import %d album(s) into %s%s\n", n, inv.libPath, extra)
 		return exitOK
 	case n == 0:
-		fmt.Fprintf(a.Stdout, "Nothing to import in %s.\n", path)
+		fmt.Fprintf(a.Stdout, "Nothing to import in %s.%s\n", path, extra)
 	default:
 		if err := lib.Save(inv.libPath); err != nil {
 			return a.fail("saving library: %v", err)
 		}
-		fmt.Fprintf(a.Stdout, "Imported %d album(s) into %s\n", n, inv.libPath)
+		fmt.Fprintf(a.Stdout, "Imported %d album(s) into %s%s\n", n, inv.libPath, extra)
 	}
 	if inv.vals.Bool("delete") {
 		if err := os.Remove(path); err != nil {

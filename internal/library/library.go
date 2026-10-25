@@ -16,6 +16,7 @@
 package library
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -326,60 +327,169 @@ func BatchTemplate() []byte {
 	return []byte("{\n  \"" + SampleAlbum + "\": \"" + SampleURL + "\"\n}\n")
 }
 
-// ImportBatch reads a batch file in either of its two shapes:
+// BatchEntry is one album from a batch file. Artist is empty for the
+// single-artist form ({"Album": "url"}), which does not say whose album it is.
+type BatchEntry struct {
+	Artist string
+	Album  string
+	Entry  Entry
+}
+
+// Skipped describes something a lenient parse (ParseLog) left out.
+type Skipped struct {
+	Where, Reason string
+}
+
+type member struct {
+	key string
+	val json.RawMessage
+}
+
+// orderedObject decodes a JSON object keeping its members in file order
+// (a Go map would lose it, and downloads should run in the order written).
+func orderedObject(data []byte) ([]member, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return nil, errors.New("expected an object")
+	}
+	var out []member
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, err
+		}
+		out = append(out, member{kt.(string), raw})
+	}
+	if _, err := dec.Token(); err != nil { // the closing brace
+		return nil, err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("unexpected data after the top-level object")
+	}
+	return out, nil
+}
+
+func isNull(raw json.RawMessage) bool { return string(bytes.TrimSpace(raw)) == "null" }
+
+// parseBatch reads both batch shapes. Strict mode stops at the first problem;
+// lenient mode (for old logs) records it in the skipped list and carries on.
+// Entries come back in file order. Placeholder entries (SampleURL) are
+// dropped silently.
+func parseBatch(data []byte, lenient bool) (entries []BatchEntry, skipped []Skipped, err error) {
+	top, err := orderedObject(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("not a JSON object: %w", err)
+	}
+	// problem either aborts (strict) or notes and continues (lenient).
+	problem := func(where string, e error) error {
+		if lenient {
+			skipped = append(skipped, Skipped{where, e.Error()})
+			return nil
+		}
+		return fmt.Errorf("%s: %w", where, e)
+	}
+	add := func(artist, album, rawURL string) error {
+		if strings.TrimSpace(rawURL) == SampleURL {
+			return nil
+		}
+		where := album
+		if artist != "" {
+			where = artist + " / " + album
+		}
+		var e Entry
+		if err := e.SetURL(rawURL); err != nil {
+			return problem(where, err)
+		}
+		entries = append(entries, BatchEntry{Artist: artist, Album: album, Entry: e})
+		return nil
+	}
+
+	for _, m := range top {
+		if isNull(m.val) {
+			continue // an artist without albums (Go would also decode null as an empty string)
+		}
+		var flat string
+		if json.Unmarshal(m.val, &flat) == nil {
+			// Single-artist form: key is an album, value a URL.
+			if lenient && strings.TrimSpace(flat) != SampleURL {
+				skipped = append(skipped, Skipped{m.key, "no artist (expected {artist: {album: url}})"})
+				continue
+			}
+			if err := add("", m.key, flat); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+		albums, oerr := orderedObject(m.val)
+		if oerr != nil {
+			if err := problem(m.key, errors.New("unsupported value")); err != nil {
+				return nil, nil, fmt.Errorf("%q: unsupported value", m.key)
+			}
+			continue
+		}
+		for _, al := range albums {
+			var u string
+			if json.Unmarshal(al.val, &u) != nil {
+				e := errors.New("expected a URL string; this looks like it is already in the new format (use it directly with --library)")
+				if err := problem(m.key+" / "+al.key, e); err != nil {
+					return nil, nil, err
+				}
+				continue
+			}
+			if err := add(m.key, al.key, u); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return entries, skipped, nil
+}
+
+// ParseBatch reads a batch file in either of its two shapes:
 //
 //	single artist:  {"Album": "url"}
 //	multi artist:   {"Artist": {"Album": "url"}}
 //
-// (the formats of the old shell and Python versions). A single-artist file
-// does not say whose albums they are, so they are filed under defaultArtist;
+// (the formats of the old shell and Python versions), in file order.
+func ParseBatch(data []byte) ([]BatchEntry, error) {
+	entries, _, err := parseBatch(data, false)
+	return entries, err
+}
+
+// ParseLog reads the old spotdll master log (~/.spotdll/log.json,
+// {"Artist": {"Album": "url"}}). Years of logging leave odd entries, so
+// anything unusable is returned in skipped instead of failing the import.
+func ParseLog(data []byte) (entries []BatchEntry, skipped []Skipped, err error) {
+	return parseBatch(data, true)
+}
+
+// ImportBatch turns a batch file into a Library. A single-artist file does
+// not say whose albums they are, so they are filed under defaultArtist;
 // usedDefault reports whether that happened. Placeholder entries (SampleURL)
 // are skipped.
 func ImportBatch(data []byte, defaultArtist string) (lib *Library, usedDefault bool, err error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, false, fmt.Errorf("not a JSON object: %w", err)
+	entries, err := ParseBatch(data)
+	if err != nil {
+		return nil, false, err
 	}
 	lib = New()
-	for key, val := range raw {
-		var flat string
-		if json.Unmarshal(val, &flat) == nil {
-			// Single-artist form: key is an album, value a URL.
-			if strings.TrimSpace(flat) == SampleURL {
-				continue
-			}
+	for _, e := range entries {
+		artist := e.Artist
+		if artist == "" {
 			if strings.TrimSpace(defaultArtist) == "" {
-				return nil, false, fmt.Errorf("%q maps straight to a URL, so this is a single-artist file: pass --artist", key)
+				return nil, false, fmt.Errorf("%q maps straight to a URL, so this is a single-artist file: pass --artist", e.Album)
 			}
-			var e Entry
-			if err := e.SetURL(flat); err != nil {
-				return nil, false, fmt.Errorf("%s: %w", key, err)
-			}
-			if err := lib.Add(defaultArtist, key, e); err != nil {
-				return nil, false, err
-			}
-			usedDefault = true
-			continue
+			artist, usedDefault = defaultArtist, true
 		}
-		var albums map[string]json.RawMessage
-		if err := json.Unmarshal(val, &albums); err != nil {
-			return nil, false, fmt.Errorf("%q: unsupported value", key)
-		}
-		for album, v := range albums {
-			var u string
-			if err := json.Unmarshal(v, &u); err != nil {
-				return nil, false, fmt.Errorf("%s / %s: expected a URL string; this looks like it is already in the new format (use it directly with --library)", key, album)
-			}
-			if strings.TrimSpace(u) == SampleURL {
-				continue
-			}
-			var e Entry
-			if err := e.SetURL(u); err != nil {
-				return nil, false, fmt.Errorf("%s / %s: %w", key, album, err)
-			}
-			if err := lib.Add(key, album, e); err != nil {
-				return nil, false, err
-			}
+		if err := lib.Add(artist, e.Album, e.Entry); err != nil {
+			return nil, false, err
 		}
 	}
 	return lib, usedDefault, nil

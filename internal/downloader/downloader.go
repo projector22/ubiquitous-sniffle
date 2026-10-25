@@ -280,12 +280,51 @@ func (d *Downloader) DownloadURL(ctx context.Context, rawURL string, forced Tool
 	if tool == Auto {
 		tool = ToolForURL(rawURL)
 	}
-	if err := d.mkdir(d.Root); err != nil {
+	d.logf("==> %s (%s)", rawURL, tool)
+	return d.run(ctx, tool, rawURL, d.Root)
+}
+
+// run creates dir and runs tool on rawURL inside it.
+func (d *Downloader) run(ctx context.Context, tool Tool, rawURL, dir string) error {
+	if err := d.mkdir(dir); err != nil {
 		return err
 	}
-	d.logf("==> %s (%s)", rawURL, tool)
 	name, args := Command(tool, rawURL)
-	return d.Runner.Run(ctx, d.Root, name, args...)
+	return d.Runner.Run(ctx, dir, name, args...)
+}
+
+// Item is one link to download into a specific directory, for batch files
+// whose layout is decided by the caller.
+type Item struct {
+	Artist, Album string
+	URL           string
+	Dir           string
+}
+
+// ItemResult is the outcome of one Item.
+type ItemResult struct {
+	Item Item
+	Err  error
+}
+
+// DownloadItems downloads each item into its own directory. Each URL gets
+// the right tool for its host, so a batch may freely mix Spotify and YouTube
+// links; a non-Auto forced tool overrides that for every item. A failing item
+// is recorded and the rest continue; cancelling ctx stops early.
+func (d *Downloader) DownloadItems(ctx context.Context, items []Item, forced Tool) []ItemResult {
+	results := make([]ItemResult, 0, len(items))
+	for i, it := range items {
+		if ctx.Err() != nil {
+			break
+		}
+		tool := forced
+		if tool == Auto {
+			tool = ToolForURL(it.URL)
+		}
+		d.logf("==> [%d/%d] %s / %s (%s)", i+1, len(items), it.Artist, it.Album, tool)
+		results = append(results, ItemResult{Item: it, Err: d.run(ctx, tool, it.URL, it.Dir)})
+	}
+	return results
 }
 
 // DownloadURLToLibrary downloads rawURL into the library layout below Root:
