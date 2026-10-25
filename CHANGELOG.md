@@ -4,6 +4,10 @@
 
 ### Added
 
+- `mdl config [KEY [VALUE]]` and a config file (`~/.config/mdl/config.json`, or `-C` / `$MDL_CONFIG`), kept apart
+  from the library. The first setting is `editor`: the command used by `mdl edit` and `mdl -c`, with arguments and
+  quoting (`mdl config editor "code --wait"`). `--unset` removes a setting.
+- `--editor` / `-e` on `mdl import` (for `-c`), as `mdl edit` already had.
 - GitHub Actions: `ci.yml` tests every pull request (format, `go mod tidy`, vet, race tests with coverage gate,
   `golangci-lint`, cross-compile); `release.yml` tests, builds and publishes a GitHub release for every `vX.Y.Z` tag.
 - Dependabot for Go modules and GitHub Actions (weekly, grouped).
@@ -14,6 +18,8 @@
 
 ### Changed
 
+- The editor is chosen from `--editor`, then the config file, then `$VISUAL`, `$EDITOR` and finally `nano`. Help and
+  docs no longer mention `vi` as the default.
 - `mdl import` of a single-artist file (`{"Album": "url"}`) no longer requires `--artist`: without it the albums
   are filed under the name of the directory containing the file.
 

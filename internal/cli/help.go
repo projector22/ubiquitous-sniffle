@@ -117,6 +117,7 @@ func (a *App) topHelp() string {
   mdl -b https://music.youtube.com/playlist?list=...   ...then run beet on it
   mdl --youtube https://example.com/...      force yt-dlp (or --spotify to force spotdl)
   mdl -t https://music.youtube.com/playlist?list=...   file it under <Artist>/<Album>/ in the music dir
+  mdl config editor "code --wait"           save the editor that mdl edit and mdl -c use
   mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
   mdl list
   mdl tui                                   browse; press d to download the selection
@@ -136,7 +137,8 @@ func formatEnv() string {
 	rows := [][2]string{
 		{"MDL_LIBRARY", "library file (default: $XDG_CONFIG_HOME/mdl/library.json or ~/.config/mdl/library.json)"},
 		{"MDL_MUSIC_DIR", "where Artist/Album folders are created (default: current directory)"},
-		{"VISUAL, EDITOR", "editor used by `mdl edit` (default: vi)"},
+		{"MDL_CONFIG", "config file with saved settings (default: $XDG_CONFIG_HOME/mdl/config.json or ~/.config/mdl/config.json)"},
+		{"VISUAL, EDITOR", "editor for `mdl edit` and `mdl -c` unless one is saved with `mdl config editor` (default: nano)"},
 	}
 	var b strings.Builder
 	for _, r := range rows {
