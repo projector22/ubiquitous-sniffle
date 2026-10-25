@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mdl/internal/config"
 	"mdl/internal/deps"
 	"mdl/internal/downloader"
 	"mdl/internal/library"
@@ -64,6 +65,7 @@ var globalOpts = []Opt{
 	{'h', "help", "", "Show this help. After a command name it shows help for that command."},
 	{'V', "version", "", "Print the mdl version and exit."},
 	{'L', "library", "FILE", "Library file to use. Default: $MDL_LIBRARY, else ~/.config/mdl/library.json."},
+	{'C', "config", "FILE", "Config file (settings such as the editor) to use. Default: $MDL_CONFIG, else ~/.config/mdl/config.json. Separate from the library."},
 	{'m', "music-dir", "DIR", "Directory under which <Artist>/<Album> folders are created. Default: $MDL_MUSIC_DIR, else the current directory."},
 	{'n', "dry-run", "", "Print the external commands that would run (downloaders, beet, installers, editor) without running or creating anything."},
 }
@@ -95,12 +97,13 @@ func (c command) usageName() string {
 
 // invocation carries everything a command needs.
 type invocation struct {
-	ctx      context.Context
-	vals     *Values
-	args     []string
-	libPath  string
-	musicDir string
-	dry      bool
+	ctx        context.Context
+	vals       *Values
+	args       []string
+	libPath    string
+	configPath string
+	musicDir   string
+	dry        bool
 }
 
 func (a *App) commands() []command {
@@ -170,10 +173,32 @@ func (a *App) commands() []command {
 		{
 			Name:    "edit",
 			Summary: "Open the library file in your editor",
-			Long: "Opens the library in $VISUAL or $EDITOR (default vi), creating an empty library first if none exists, " +
-				"and validates the file when the editor exits.",
-			Opts: []Opt{{'e', "editor", "CMD", "Editor command to use instead of $VISUAL / $EDITOR. May include arguments, e.g. \"code -w\"."}},
-			run:  a.cmdEdit,
+			Long: "Opens the library in your editor, creating an empty library first if none exists, " +
+				"and validates the file when the editor exits. The editor is --editor if given, else the one saved " +
+				"with `mdl config editor`, else $VISUAL, else $EDITOR, else nano.",
+			Opts:     []Opt{editorOpt},
+			Examples: []string{"mdl edit", `mdl edit --editor "code --wait"`},
+			run:      a.cmdEdit,
+		},
+		{
+			Name: "config", Args: "[KEY [VALUE]]",
+			Summary: "Show or change saved settings (such as the editor)",
+			Long: "Settings live in a small JSON file, separate from the library (default ~/.config/mdl/config.json; " +
+				"see --config). With no arguments, lists every setting, its value and where the value comes from. " +
+				"With KEY, prints its value. With KEY and VALUE, saves it. With --unset, removes it. " +
+				"Settings: editor - the command that `mdl edit` and `mdl -c` run, with arguments and quotes if needed. " +
+				"The editor is chosen from: --editor, the config file, $VISUAL, $EDITOR, nano.",
+			Opts: []Opt{
+				{'u', "unset", "", "Remove KEY from the config file so the environment or the default applies again."},
+			},
+			Examples: []string{
+				"mdl config                               list settings and where they come from",
+				`mdl config editor "code --wait"          always use VS Code`,
+				`mdl config editor "'/opt/My Editor/ed' -w"   quote paths that contain spaces`,
+				"mdl config editor                        print the editor mdl will use",
+				"mdl config --unset editor                go back to $VISUAL / $EDITOR / nano",
+			},
+			run: a.cmdConfig,
 		},
 		{
 			Name: "import", Args: "[FILE]",
@@ -184,11 +209,13 @@ func (a *App) commands() []command {
 				"opens it in your editor, and imports it when the editor closes; nothing is downloaded. " +
 				"Without --create, FILE must already exist. A single-artist file does not say whose albums they are: " +
 				"they are filed under --artist if given, otherwise under the name of the directory the file is in. " +
-				"A file with its own artists ignores --artist. Existing albums are updated, never removed.",
+				"A file with its own artists ignores --artist. Existing albums are updated, never removed. " +
+				"With --create the editor is chosen as for `mdl edit` (see `mdl config`).",
 			Opts: []Opt{
 				{'c', "create", "", "Create FILE from a sample (or edit it if it exists) in your editor, then import it. Saving the sample untouched imports nothing."},
 				{'a', "artist", "NAME", "Artist for a single-artist file. Default: the name of the directory containing FILE."},
 				{'d', "delete", "", "Delete FILE after it has been imported successfully."},
+				editorOpt,
 			},
 			Examples: []string{
 				"mdl -c                                   create ./mdl.json, edit it, import it",
@@ -357,6 +384,10 @@ func (a *App) runCommand(ctx context.Context, cmd *command, globals *Values, arg
 	}
 	if inv.libPath == "" {
 		inv.libPath = library.DefaultPath(a.Getenv, a.Home)
+	}
+	inv.configPath = all.String("config")
+	if inv.configPath == "" {
+		inv.configPath = config.DefaultPath(a.Getenv, a.Home)
 	}
 	if inv.musicDir == "" {
 		inv.musicDir = a.Getenv("MDL_MUSIC_DIR")
@@ -717,23 +748,11 @@ func (a *App) cmdTUI(inv *invocation) int {
 	return a.runJobs(inv, jobs, forced)
 }
 
-// editorCommand resolves the editor to run as program + leading arguments:
-// --editor, else $VISUAL, else $EDITOR, else vi.
-func (a *App) editorCommand(v *Values) []string {
-	editor := v.String("editor")
-	for _, name := range []string{"VISUAL", "EDITOR"} {
-		if editor == "" {
-			editor = a.Getenv(name)
-		}
-	}
-	if editor == "" {
-		editor = "nano"
-	}
-	return strings.Fields(editor)
-}
-
 func (a *App) cmdEdit(inv *invocation) int {
-	parts := a.editorCommand(inv.vals)
+	parts, err := a.editorCommand(inv)
+	if err != nil {
+		return a.fail("%v", err)
+	}
 
 	if _, err := os.Stat(inv.libPath); errors.Is(err, fs.ErrNotExist) && !inv.dry {
 		if err := library.New().Save(inv.libPath); err != nil {
@@ -792,7 +811,10 @@ func (a *App) editBatchFile(inv *invocation, path string) (code int, proceed boo
 		}
 		fmt.Fprintf(a.Stderr, "Created %s - add albums as \"Album\": \"url\" (or \"Artist\": {\"Album\": \"url\"}).\n", path)
 	}
-	parts := a.editorCommand(inv.vals)
+	parts, err := a.editorCommand(inv)
+	if err != nil {
+		return a.fail("%v", err), false
+	}
 	if err := a.runnerFor(inv).Run(inv.ctx, "", parts[0], append(parts[1:], path)...); err != nil {
 		return a.fail("%v", err), false
 	}

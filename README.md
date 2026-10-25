@@ -98,7 +98,7 @@ mdl download                      # every album in the library
 mdl download -a "Daft Punk" -sb   # one artist, force Spotify links, then run beet on each folder
 mdl download --youtube            # use each album's YouTube link instead
 mdl beet ~/Music/Daft\ Punk       # run beet on a folder (default: current directory)
-mdl edit                          # open the library in $EDITOR
+mdl edit                          # open the library in your editor (see Configuration)
 mdl -n download                   # dry run: show the commands, change nothing
 ```
 
@@ -174,6 +174,31 @@ Unknown keys are rejected, so a typo like `"youtbe"` is reported instead of igno
 
 Location: `-L FILE`, else `$MDL_LIBRARY`, else `~/.config/mdl/library.json`.
 Music directory for the `Artist/Album` layout: `-m DIR`, else `$MDL_MUSIC_DIR`, else the current directory. Plain URL downloads ignore `$MDL_MUSIC_DIR` and use the current directory unless `-m` is given.
+
+### Configuration
+
+Settings are saved in a small JSON file, **separate from the library**: `-C FILE`, else `$MDL_CONFIG`, else
+`~/.config/mdl/config.json`. Manage it with `mdl config` instead of editing it by hand:
+
+```sh
+mdl config                              # list settings and where each value comes from
+mdl config editor "code --wait"         # always use this editor (arguments allowed)
+mdl config editor "'/opt/My Editor/ed' -w"   # quote paths that contain spaces
+mdl config editor                       # print the editor mdl will use
+mdl config --unset editor               # forget it again
+```
+
+The **editor** is used by `mdl edit` and `mdl -c`. It is chosen from, first match wins:
+
+1. `--editor CMD` (`-e`) for a single run
+2. the `editor` setting in the config file
+3. `$VISUAL`
+4. `$EDITOR`
+5. `nano`
+
+As with git's `core.editor`, a saved choice beats the environment variables. mdl warns, but still saves, if the
+command is not on your `PATH`. A config file that cannot be read (bad JSON, an unknown key) is reported and never
+overwritten.
 
 ### TUI
 
@@ -263,7 +288,7 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
 ## Features to build
 
 - [x] Dependabot and CI.
-- [ ] Choose default editor, not just vi
+- [x] Choose default editor, not just vi
 - [x] Generate an edit file with -c. Import with and without artist defined
   - [ ] The default behaviour for running mdl without arguments if a mdl.json is present, is to download on it.
   - [ ] The flags to force Youtube or Spotify should be respected.
