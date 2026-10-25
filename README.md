@@ -295,3 +295,4 @@ grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/
   - [ ] otherwise mdl should use the correct tool depending on the url, and switch if urls are mixed
 - [ ] -m should use the targetted path for import data.
 - [ ] Import for old spotdll
+- [ ] Implement for easy go distribution
