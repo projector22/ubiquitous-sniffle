@@ -953,18 +953,23 @@ func TestToLibraryRecordsTheFolderThatWasFilled(t *testing.T) {
 func TestRecordNames(t *testing.T) {
 	wd, _ := os.Getwd()
 	wantArtist, wantAlbum := filepath.Base(filepath.Dir(wd)), filepath.Base(wd)
-	a, b := recordNames("", "", nil)
+	a, b := recordNames("", "", nil, ".")
 	if a != wantArtist || b != wantAlbum {
 		t.Errorf("directory fallback = %q / %q, want %q / %q", a, b, wantArtist, wantAlbum)
 	}
-	if a, b := recordNames("A", "B", []string{"/m/X/Y"}); a != "A" || b != "B" {
+	if a, b := recordNames("A", "B", []string{"/m/X/Y"}, "."); a != "A" || b != "B" {
 		t.Errorf("flags win: %q / %q", a, b)
 	}
-	if a, b := recordNames("", "", []string{"/m/X/Y"}); a != "X" || b != "Y" {
+	if a, b := recordNames("", "", []string{"/m/X/Y"}, "."); a != "X" || b != "Y" {
 		t.Errorf("landed folder: %q / %q", a, b)
 	}
-	if a, b := recordNames("", "B", []string{"/m/X/Y", "/m/P/Q"}); a != wantArtist || b != "B" {
+	if a, b := recordNames("", "B", []string{"/m/X/Y", "/m/P/Q"}, "."); a != wantArtist || b != "B" {
 		t.Errorf("ambiguous folders fall back per field: %q / %q", a, b)
+	}
+	// The fallback names come from the directory given, not the working directory.
+	target := filepath.Join(t.TempDir(), "Daft Punk", "Discovery")
+	if a, b := recordNames("", "", nil, target); a != "Daft Punk" || b != "Discovery" {
+		t.Errorf("-m target fallback = %q / %q", a, b)
 	}
 }
 
@@ -1182,7 +1187,9 @@ func TestImportCreateDryRunAndErrors(t *testing.T) {
 	h.fake.Err = nil
 	h.expect(t, 1, "import", "-c", filepath.Join(dir, "missing-dir", "x.json"))
 	// Usage errors.
+	h.chdir(t, "empty") // no mdl.json here, so a bare import has nothing to read
 	h.expect(t, 2, "import")
+	h.chdir(t, "../A")
 	h.expect(t, 2, "import", "a.json", "b.json")
 	h.expect(t, 1, "import", filepath.Join(dir, "nope.json"))
 	_ = os.MkdirAll(filepath.Dir(h.libPath), 0o755)

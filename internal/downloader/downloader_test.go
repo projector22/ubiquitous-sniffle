@@ -488,3 +488,86 @@ func TestNameOfDir(t *testing.T) {
 		t.Errorf("root gave %q %v", name, ok)
 	}
 }
+
+func TestDownloadItemsPicksTheToolPerURL(t *testing.T) {
+	root := t.TempDir()
+	f := &runner.Fake{}
+	var out bytes.Buffer
+	d := &Downloader{Runner: f, Root: root, Out: &out}
+	items := []Item{
+		{Artist: "A", Album: "One", URL: "https://open.spotify.com/album/1", Dir: filepath.Join(root, "One")},
+		{Artist: "A", Album: "Two", URL: "https://music.youtube.com/playlist?list=2", Dir: filepath.Join(root, "Two")},
+		{Artist: "A", Album: "Three", URL: "https://youtu.be/3", Dir: filepath.Join(root, "sub", "Three")},
+	}
+	results := d.DownloadItems(context.Background(), items, Auto)
+	if len(results) != 3 {
+		t.Fatalf("results = %+v", results)
+	}
+	var tools []string
+	for i, c := range f.Calls {
+		tools = append(tools, c.Name)
+		if c.Dir != items[i].Dir || results[i].Err != nil {
+			t.Errorf("item %d: call dir %q, err %v", i, c.Dir, results[i].Err)
+		}
+		if !exists(items[i].Dir) {
+			t.Errorf("directory %q was not created", items[i].Dir)
+		}
+	}
+	if strings.Join(tools, ",") != "spotdl,yt-dlp,yt-dlp" {
+		t.Errorf("tools = %v (mixed URLs must switch tool)", tools)
+	}
+	if !strings.Contains(out.String(), "[2/3] A / Two (yt-dlp)") {
+		t.Errorf("progress = %q", out.String())
+	}
+	// A forced tool wins for every item.
+	f.Calls = nil
+	d.DownloadItems(context.Background(), items, Spotdl)
+	for _, c := range f.Calls {
+		if c.Name != "spotdl" {
+			t.Errorf("forced spotdl, got %s", c.Name)
+		}
+	}
+}
+
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+func TestDownloadItemsFailureCancellationAndDryRun(t *testing.T) {
+	root := t.TempDir()
+	items := []Item{
+		{Album: "One", URL: "https://youtu.be/1", Dir: filepath.Join(root, "One")},
+		{Album: "Two", URL: "https://youtu.be/2", Dir: filepath.Join(root, "Two")},
+		{Album: "Three", URL: "https://youtu.be/3", Dir: filepath.Join(root, "Three")},
+	}
+	f := &runner.Fake{Err: func(c runner.Call) error {
+		if strings.HasSuffix(c.Dir, "Two") {
+			return errors.New("boom")
+		}
+		return nil
+	}}
+	d := &Downloader{Runner: f, Root: root}
+	res := d.DownloadItems(context.Background(), items, Auto)
+	if len(res) != 3 || res[0].Err != nil || res[1].Err == nil || res[2].Err != nil {
+		t.Errorf("one failure must not stop the rest: %+v", res)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d.Runner = &runner.Fake{Err: func(runner.Call) error { cancel(); return nil }}
+	if res := d.DownloadItems(ctx, items, Auto); len(res) != 1 {
+		t.Errorf("cancellation should stop after the current item, got %d results", len(res))
+	}
+
+	dry := filepath.Join(t.TempDir(), "never")
+	dd := &Downloader{Runner: &runner.Fake{}, Root: dry, DryRun: true}
+	dd.DownloadItems(context.Background(), []Item{{URL: "https://youtu.be/1", Dir: filepath.Join(dry, "x")}}, Auto)
+	if exists(dry) {
+		t.Error("dry run must not create directories")
+	}
+	// A directory that cannot be created is reported per item.
+	blocker := filepath.Join(t.TempDir(), "f")
+	_ = os.WriteFile(blocker, nil, 0o644)
+	d.Runner = &runner.Fake{}
+	bad := d.DownloadItems(context.Background(), []Item{{URL: "https://youtu.be/1", Dir: filepath.Join(blocker, "x")}}, Auto)
+	if len(bad) != 1 || bad[0].Err == nil {
+		t.Errorf("expected a mkdir error, got %+v", bad)
+	}
+}

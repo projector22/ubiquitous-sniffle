@@ -74,7 +74,8 @@ func paragraph(text string) string {
 func (a *App) topHelp() string {
 	var b strings.Builder
 	b.WriteString("mdl - download, organise and browse a personal music library\n\n")
-	b.WriteString("USAGE\n  mdl [OPTIONS] URL...                          download URLs into the current directory\n" +
+	b.WriteString("USAGE\n  mdl                                           download ./mdl.json, if there is one\n" +
+		"  mdl [OPTIONS] URL...                          download URLs into the current directory\n" +
 		"  mdl [GLOBAL OPTIONS] <command> [OPTIONS] [ARGUMENTS]\n  mdl <command> --help\n\n")
 	b.WriteString("DESCRIPTION\n")
 	b.WriteString(paragraph("mdl keeps one library file that maps artist -> album -> Spotify / YouTube link, " +

@@ -4,6 +4,15 @@
 
 ### Added
 
+- Plain `mdl` downloads `./mdl.json` when it exists (the original script's normal mode); `mdl -f FILE` / `mdl download
+  --file FILE` names another batch file and `-d` / `--delete` removes it after a fully successful run. A single-artist
+  file downloads into `<dir>/<Album>/` (the directory is the artist's folder), a multi-artist file into
+  `<dir>/<Artist>/<Album>/`. Albums download in file order, each URL with the tool for its host (Spotify and YouTube
+  may be mixed), `--spotify` / `--youtube` force one, and every album that succeeds is recorded in the library.
+- `mdl import --spotdll-log` (`-l`) imports the old Python script's `~/.spotdll/log.json`, skipping and listing
+  entries that can no longer be used instead of failing.
+- Plain `mdl import` imports `./mdl.json`.
+- Clear "nothing to download" message for download options given with no URL and no `mdl.json` (previously "unknown option").
 - `mdl config [KEY [VALUE]]` and a config file (`~/.config/mdl/config.json`, or `-C` / `$MDL_CONFIG`), kept apart
   from the library. The first setting is `editor`: the command used by `mdl edit` and `mdl -c`, with arguments and
   quoting (`mdl config editor "code --wait"`). `--unset` removes a setting.
@@ -18,6 +27,10 @@
 
 ### Changed
 
+- `-m DIR` is now the target directory for batch files (`mdl.json` is read from and downloaded into it; `mdl import`
+  and `mdl -c` use `DIR/mdl.json`) and the directory whose name decides the artist and album a plain URL is recorded
+  under. `$MDL_MUSIC_DIR` is still only the root of the `Artist/Album` layout.
+- Batch files keep the order of their entries.
 - The editor is chosen from `--editor`, then the config file, then `$VISUAL`, `$EDITOR` and finally `nano`. Help and
   docs no longer mention `vi` as the default.
 - `mdl import` of a single-artist file (`{"Album": "url"}`) no longer requires `--artist`: without it the albums
