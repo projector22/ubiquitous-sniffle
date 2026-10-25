@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"mdl/internal/atomicfile"
 )
 
 // Entry holds the download links for one album. At least one link must be set
@@ -189,26 +191,7 @@ func (l *Library) Write(w io.Writer) error {
 // Save writes the library to path atomically (temp file + rename), creating
 // parent directories as needed.
 func (l *Library) Save(path string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".mdl-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }() // no-op after a successful rename
-	if err := l.Write(tmp); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.Write(path, 0o644, l.Write)
 }
 
 // ResolveArtist finds an existing artist by exact name, falling back to a
