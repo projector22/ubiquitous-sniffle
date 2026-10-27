@@ -287,7 +287,8 @@ make help         # all targets
 make check        # gofmt, go mod tidy check, go vet (Linux + Windows), race tests, coverage gate - what CI runs
 make cover-html   # coverage report
 make dist         # release archives for every platform in ./dist
-make tag TAG=v1.0.0   # run checks, tag and push; CI publishes the release
+make release-patch    # bump the latest tag (also release-minor / release-major), run checks, tag and push
+make tag TAG=v1.0.0   # same, with an explicit version; CI publishes the release
 ```
 
 Layout:
@@ -313,8 +314,9 @@ without downloading anything (`mdl -n ...` uses the same seam for dry runs).
   and `make lint`.
 * **On a `vX.Y.Z` tag** (`.github/workflows/release.yml`): the same checks, then archives for Linux, macOS and
   Windows plus `checksums.txt` are built with `make dist` and published as a GitHub release with generated
-  release notes. A tag with a suffix (`v1.2.3-rc1`) is marked as a pre-release. Cut one with
-  `make tag TAG=v1.2.3`.
+  release notes. A tag with a suffix (`v1.2.3-rc1`) is marked as a pre-release. Cut one from an
+  up-to-date `master` with `make release-patch` (or `release-minor` / `release-major`), or with
+  `make tag TAG=v1.2.3` for an explicit version.
 * **Dependabot** (`.github/dependabot.yml`): every Monday it opens one grouped pull request for Go module updates
   (minor and patch) and one for GitHub Actions updates, which CI then tests like any other pull request.
 

@@ -10,11 +10,13 @@ DIST      := dist
 INSTALL_DIR ?= $(HOME)/.local/bin
 COVER_MIN ?= 85
 PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+RELEASE_BRANCH ?= master
+LATEST_TAG = $(shell git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1)
 SHA256    := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
 .DEFAULT_GOAL := help
 .PHONY: help build run install uninstall test test-race cover cover-html cover-check \
-        fmt fmt-check vet lint tidy tidy-check check ci build-all dist tag deps clean clean-dist
+        fmt fmt-check vet lint tidy tidy-check check ci build-all dist tag release-patch release-minor release-major release deps clean clean-dist
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make \033[36m<target>\033[0m\n\n"} \
@@ -124,6 +126,29 @@ tag: ## Tag and push a release: make tag TAG=v1.2.3 (CI builds and publishes it)
 	$(MAKE) check
 	git tag -a $(TAG) -m "Release $(TAG)"
 	git push origin $(TAG)
+
+release-patch: ## Release the next patch version (v0.3.5 -> v0.3.6)
+	@$(MAKE) --no-print-directory release BUMP=patch
+
+release-minor: ## Release the next minor version (v0.3.5 -> v0.4.0)
+	@$(MAKE) --no-print-directory release BUMP=minor
+
+release-major: ## Release the next major version (v0.3.5 -> v1.0.0)
+	@$(MAKE) --no-print-directory release BUMP=major
+
+release:
+	@case "$(BUMP)" in patch|minor|major) ;; *) echo "usage: make release-patch | release-minor | release-major"; exit 1;; esac
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	[ "$$branch" = "$(RELEASE_BRANCH)" ] || { echo "releases are cut from $(RELEASE_BRANCH), not $$branch"; exit 1; }
+	@git fetch --quiet --tags origin
+	@git diff --quiet HEAD @{u} 2>/dev/null || { echo "$(RELEASE_BRANCH) is not in sync with its upstream: pull or push first"; exit 1; }
+	@prev="$(LATEST_TAG)"; prev=$${prev:-v0.0.0}; \
+	next=$$(echo "$$prev" | awk -F. -v bump=$(BUMP) '{ sub(/^v/, "", $$1); \
+	  if (bump == "major") { $$1++; $$2 = 0; $$3 = 0 } else if (bump == "minor") { $$2++; $$3 = 0 } else { $$3++ } \
+	  printf "v%d.%d.%d", $$1, $$2, $$3 }'); \
+	printf "Release %s (previous %s)? [y/N] " "$$next" "$$prev"; read ans; \
+	case "$$ans" in y|Y|yes) ;; *) echo "aborted"; exit 1;; esac; \
+	$(MAKE) --no-print-directory tag TAG=$$next
 
 ## ---- cleanup ---------------------------------------------------------------
 
