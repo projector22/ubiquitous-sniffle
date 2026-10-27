@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"mdl/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
 )
 
 // Dep describes one external tool.

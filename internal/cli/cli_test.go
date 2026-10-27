@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"mdl/internal/library"
-	"mdl/internal/runner"
-	"mdl/internal/tui"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/tui"
 )
 
 // harness bundles an App with captured output and a temp library path.

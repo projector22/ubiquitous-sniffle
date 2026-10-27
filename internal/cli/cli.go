@@ -15,12 +15,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mdl/internal/config"
-	"mdl/internal/deps"
-	"mdl/internal/downloader"
-	"mdl/internal/library"
-	"mdl/internal/runner"
-	"mdl/internal/tui"
+	"github.com/projector22/ubiquitous-sniffle/internal/config"
+	"github.com/projector22/ubiquitous-sniffle/internal/deps"
+	"github.com/projector22/ubiquitous-sniffle/internal/downloader"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/tui"
 )
 
 // Process exit codes.

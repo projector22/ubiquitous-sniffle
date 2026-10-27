@@ -1,4 +1,4 @@
-module mdl
+module github.com/projector22/ubiquitous-sniffle
 
 go 1.24.2
 

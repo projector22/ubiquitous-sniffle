@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"mdl/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)

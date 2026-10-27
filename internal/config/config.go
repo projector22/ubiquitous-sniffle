@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mdl/internal/atomicfile"
+	"github.com/projector22/ubiquitous-sniffle/internal/atomicfile"
 )
 
 // Setting names accepted by Get, Set and Unset.
