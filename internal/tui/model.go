@@ -14,8 +14,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"mdl/internal/downloader"
-	"mdl/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/downloader"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
 )
 
 // Action is what the caller should do after the TUI exits.

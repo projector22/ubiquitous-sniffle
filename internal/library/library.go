@@ -27,7 +27,7 @@ import (
 	"sort"
 	"strings"
 
-	"mdl/internal/atomicfile"
+	"github.com/projector22/ubiquitous-sniffle/internal/atomicfile"
 )
 
 // Entry holds the download links for one album. At least one link must be set

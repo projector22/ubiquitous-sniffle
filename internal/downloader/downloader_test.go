@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"mdl/internal/library"
-	"mdl/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
 )
 
 func lib(t *testing.T) *library.Library {

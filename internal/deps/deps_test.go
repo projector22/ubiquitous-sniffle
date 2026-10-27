@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"mdl/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
 )
 
 // have returns a LookPath that only knows the given executables.

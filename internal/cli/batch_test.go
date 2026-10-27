@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"mdl/internal/library"
-	"mdl/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
 )
 
 func writeFile(t *testing.T, path, content string) {

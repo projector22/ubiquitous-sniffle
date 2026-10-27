@@ -12,6 +12,8 @@ It is a single static binary. The TUI is built with [Bubble Tea](https://github.
 ## Install
 
 ```sh
+go install github.com/projector22/ubiquitous-sniffle/cmd/mdl@latest   # installs mdl to $(go env GOPATH)/bin
+# or, from a clone:
 make install              # builds and installs to ~/.local/bin/mdl (INSTALL_DIR=... to change)
 export PATH="$HOME/.local/bin:$PATH"   # if ~/.local/bin is not already on your PATH
 mdl install               # installs beet, yt-dlp and spotdl via pipx (or pip --user)
@@ -322,12 +324,9 @@ without downloading anything (`mdl -n ...` uses the same seam for dry runs).
 
 ### Module path
 
-The module is named `mdl`. To `go install` it from GitHub, rename it first:
-
-```sh
-go mod edit -module github.com/YOU/mdl
-grep -rl '"mdl/' --include='*.go' . | xargs sed -i 's#"mdl/#"github.com/YOU/mdl/#'
-```
+The module is `github.com/projector22/ubiquitous-sniffle`, so `go install .../cmd/mdl@<tag>` works for every
+release tag, and the binary reports that tag from `mdl --version` even without
+the Makefile's `-ldflags`.
 
 ## Features to build
 

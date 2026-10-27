@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"mdl/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
 )
 
 // Run shows the browser full-screen and blocks until the user quits or asks

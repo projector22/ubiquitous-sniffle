@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"mdl/internal/library"
-	"mdl/internal/runner"
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/runner"
 )
 
 // Tool names an external downloader.

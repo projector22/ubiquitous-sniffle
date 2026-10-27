@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"mdl/internal/config"
+	"github.com/projector22/ubiquitous-sniffle/internal/config"
 )
 
 // defaultEditor is used when nothing else names an editor.
