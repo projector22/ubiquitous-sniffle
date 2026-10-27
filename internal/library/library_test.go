@@ -38,6 +38,9 @@ func TestClassifyURL(t *testing.T) {
 		{"https://music.youtube.com/playlist?list=x", SourceYouTube, true},
 		{"https://www.youtube.com/watch?v=x", SourceYouTube, true},
 		{"https://youtu.be/x", SourceYouTube, true},
+		{"https://someartist.bandcamp.com/album/x", SourceBandcamp, true},
+		{"https://bandcamp.com/EmbeddedPlayer/album=1", SourceBandcamp, true},
+		{"https://notbandcamp.com/album/x", SourceUnknown, false},
 		{"https://notspotify.com/x", SourceUnknown, false},
 		{"https://evil.com/open.spotify.com", SourceUnknown, false},
 		{"ftp://open.spotify.com/x", SourceUnknown, false},
@@ -53,7 +56,7 @@ func TestClassifyURL(t *testing.T) {
 }
 
 func TestSourceString(t *testing.T) {
-	if SourceSpotify.String() != "spotify" || SourceYouTube.String() != "youtube" || SourceUnknown.String() != "unknown" {
+	if SourceSpotify.String() != "spotify" || SourceYouTube.String() != "youtube" || SourceBandcamp.String() != "bandcamp" || SourceUnknown.String() != "unknown" {
 		t.Error("unexpected Source.String values")
 	}
 }
@@ -71,6 +74,10 @@ func TestEntrySetURL(t *testing.T) {
 	}
 	if e.Spotify != "https://open.spotify.com/album/a" || e.YouTube != "https://youtu.be/b" || e.Empty() {
 		t.Errorf("unexpected entry %+v", e)
+	}
+	bc := Entry{}
+	if err := bc.SetURL("https://a.bandcamp.com/album/c"); err != nil || bc.Bandcamp != "https://a.bandcamp.com/album/c" || bc.Empty() {
+		t.Errorf("bandcamp entry %+v, %v", bc, err)
 	}
 	if err := e.SetURL("https://example.com"); err == nil {
 		t.Error("expected error for unsupported host")
@@ -330,7 +337,7 @@ func TestImportBatch(t *testing.T) {
 	})
 	for name, tc := range map[string]struct{ in, artist, want string }{
 		"single without artist": {`{"X":"https://open.spotify.com/a"}`, "", "--artist"},
-		"bad url single":        {`{"X":"https://example.com"}`, "A", "neither"},
+		"bad url single":        {`{"X":"https://example.com"}`, "A", "not a Spotify, YouTube or Bandcamp"},
 		"bad url multi":         {`{"A":{"X":"nope"}}`, "", "valid http"},
 		"new format":            {`{"A":{"X":{"spotify":"s"}}}`, "", "already in the new format"},
 		"number value":          {`{"A":5}`, "", "unsupported"},
@@ -414,7 +421,7 @@ func TestParseBatchStrictErrorsAndEdgeCases(t *testing.T) {
 		"bad url":        {`{"A": {"B": "nope"}}`, "A / B"},
 		"unsupported":    {`{"A": 5}`, `"A": unsupported value`},
 		"nested object":  {`{"A": {"B": {"spotify": "x"}}}`, "already in the new format"},
-		"flat bad host":  {`{"B": "https://example.com"}`, "neither a Spotify nor a YouTube"},
+		"flat bad host":  {`{"B": "https://example.com"}`, "not a Spotify, YouTube or Bandcamp"},
 		"unsupported 2":  {`{"A": [1]}`, "unsupported value"},
 		"empty document": {``, "not a JSON object"},
 	} {
@@ -452,7 +459,7 @@ func TestParseLogIsLenient(t *testing.T) {
 		t.Fatalf("skipped = %+v", skipped)
 	}
 	for where, want := range map[string]string{
-		"Daft Punk / Bad": "neither a Spotify nor a YouTube",
+		"Daft Punk / Bad": "not a Spotify, YouTube or Bandcamp",
 		"Abba / Arrival":  "expected a URL string",
 		"Loose":           "no artist",
 		"Number":          "unsupported value",

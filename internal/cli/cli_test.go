@@ -503,6 +503,48 @@ func TestImportCommand(t *testing.T) {
 	h.expect(t, 1, "import", multi)
 }
 
+func TestBandcampLinks(t *testing.T) {
+	h := newHarness(t)
+	bc := "https://someartist.bandcamp.com/album/some-album"
+	batch := filepath.Join(h.dir, "mdl.json")
+	_ = os.WriteFile(batch, []byte(`{"Some Album": "`+bc+`", "Other": "https://open.spotify.com/album/o"}`), 0o644)
+
+	h.expect(t, 0, "import", batch, "-a", "Some Artist")
+	if e, ok := h.library(t).Get("Some Artist", "Some Album"); !ok || e.Bandcamp != bc {
+		t.Fatalf("Bandcamp link not imported: %+v", e)
+	}
+	h.expect(t, 0, "list", "-u")
+	if out := h.out.String(); !strings.Contains(out, "Some Album  [bandcamp]") || !strings.Contains(out, "bandcamp "+bc) {
+		t.Errorf("list:\n%s", out)
+	}
+	h.expect(t, 0, "add", "-a", "Some Artist", "-A", "Other", "-u", "https://x.bandcamp.com/album/o")
+
+	// Library downloads use yt-dlp on the Bandcamp link, after Spotify.
+	h.expect(t, 0, "download", "-a", "Some Artist", "-A", "Some Album")
+	if c := h.fake.Calls; len(c) != 1 || c[0].Name != "yt-dlp" || c[0].Args[len(c[0].Args)-1] != bc {
+		t.Errorf("calls = %+v", c)
+	}
+	h.expect(t, 0, "download", "-a", "Some Artist", "-A", "Other")
+	if c := h.fake.Calls; len(c) != 1 || c[0].Name != "spotdl" {
+		t.Errorf("Spotify should win: %+v", c)
+	}
+	h.expect(t, 0, "download", "-B", "-a", "Some Artist", "-A", "Other")
+	if c := h.fake.Calls; len(c) != 1 || c[0].Name != "yt-dlp" || c[0].Args[len(c[0].Args)-1] != "https://x.bandcamp.com/album/o" {
+		t.Errorf("--bandcamp: %+v", h.fake.Calls)
+	}
+	h.expect(t, 2, "download", "-sB")
+
+	// A batch file and a plain URL download Bandcamp with yt-dlp too.
+	h.expect(t, 0, "download", "--file", batch, "-N")
+	if c := h.fake.Calls; len(c) != 2 || c[0].Name != "yt-dlp" || c[1].Name != "spotdl" {
+		t.Errorf("batch calls = %+v", c)
+	}
+	h.expect(t, 0, "-a", "New", "-A", "Album", "https://new.bandcamp.com/album/a")
+	if e, _ := h.library(t).Get("New", "Album"); h.fake.Calls[0].Name != "yt-dlp" || e.Bandcamp == "" {
+		t.Errorf("URL download: calls %+v, entry %+v", h.fake.Calls, e)
+	}
+}
+
 func TestTUICommand(t *testing.T) {
 	h := newHarness(t)
 	h.expect(t, 1, "tui") // no library

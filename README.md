@@ -2,7 +2,7 @@
 
 Download, organise and browse a personal music library from the terminal.
 
-`mdl` keeps **one library file** mapping *artist → album → Spotify / YouTube link*,
+`mdl` keeps **one library file** mapping *artist → album → Spotify / YouTube / Bandcamp link*,
 downloads those albums with [spotdl](https://github.com/spotDL/spotify-downloader)
 or [yt-dlp](https://github.com/yt-dlp/yt-dlp) into `<music-dir>/<Artist>/<Album>/`,
 and can hand the result to [beets](https://beets.io) for tagging.
@@ -35,12 +35,13 @@ mdl https://open.spotify.com/album/...            # spotdl, into the current dir
 mdl https://music.youtube.com/playlist?list=...   # yt-dlp, into the current directory
 mdl -b https://open.spotify.com/album/...         # ...then run beet on it
 mdl --youtube URL                                 # force yt-dlp (or --spotify to force spotdl)
+mdl https://artist.bandcamp.com/album/...         # yt-dlp downloads Bandcamp links too
 mdl -p "bandcamp youtube-music" https://open.spotify.com/album/...   # spotdl, audio from Bandcamp if it has it
 ```
 
 Every URL that downloads successfully is also **recorded in your library file** (see below), so the library
 always reflects what you have fetched. `mdl URL...` is shorthand for `mdl download URL...`. The tool is picked from the link (Spotify → spotdl,
-YouTube → yt-dlp); `-s`/`--spotify` and `-y`/`--youtube` override that. The older names `--spotdl` and
+YouTube and Bandcamp → yt-dlp); `-s`/`--spotify`, `-y`/`--youtube` and `-B`/`--bandcamp` override that. The older names `--spotdl` and
 `--yt-dlp` still work. Use `-m DIR` to download somewhere else.
 
 ### One-off albums straight into the library
@@ -85,7 +86,7 @@ mdl https://music.youtube.com/playlist?...    # same album, adds the youtube lin
 mdl -N URL                                    # -N / --no-import: download only, record nothing
 ```
 
-Details: only Spotify and YouTube links can be stored (anything else downloads with a warning); a URL that
+Details: only Spotify, YouTube and Bandcamp links can be stored (anything else downloads with a warning); a URL that
 fails to download is not recorded; running it somewhere unrelated, like `~/Downloads`, will file the album
 under that folder's names, so pass `-a`/`-A` or `-N` there; if a different link for the same service is already
 stored, it is replaced and mdl says so. Recorded entries can be fixed later with `mdl edit`.
@@ -100,6 +101,7 @@ mdl tui                           # browse; press d to download the selection, x
 mdl download                      # every album in the library
 mdl download -a "Daft Punk" -sb   # one artist, force Spotify links, then run beet on each folder
 mdl download --youtube            # use each album's YouTube link instead
+mdl download --bandcamp           # ...or each album's Bandcamp link
 mdl beet ~/Music/Daft\ Punk       # run beet on a folder (default: current directory)
 mdl edit                          # open the library in your editor (see Configuration)
 mdl -n download                   # dry run: show the commands, change nothing
@@ -141,7 +143,7 @@ The file can have either shape, and mdl works out which:
 
 Details: the sample is a single placeholder album, and mdl ignores that placeholder, so saving the sample
 untouched imports nothing (a freshly created file left untouched is removed again). Links are classified as
-Spotify or YouTube automatically; anything else is an error and nothing from that file is imported. Existing
+Spotify, YouTube or Bandcamp automatically; anything else is an error and nothing from that file is imported. Existing
 albums are updated, never removed. `mdl import FILE` does the import without opening an editor, and plain
 `mdl import` takes `./mdl.json`.
 
@@ -162,8 +164,8 @@ mdl                       # without a mdl.json, you just get the help screen
   holding the file *is* the artist's folder and each album goes into `<dir>/<Album>/`. A file with artists
   (`{"Artist": {"Album": "url"}}`) uses `<dir>/<Artist>/<Album>/` below that directory. Albums are downloaded
   in the order they appear in the file.
-- **Which tool:** each URL gets the tool for its own link (Spotify → spotdl, YouTube → yt-dlp), so a file may mix
-  both freely. `-s` / `--spotify` or `-y` / `--youtube` forces one tool for every URL instead.
+- **Which tool:** each URL gets the tool for its own link (Spotify → spotdl, YouTube and Bandcamp → yt-dlp), so a
+  file may mix them freely. `-s` / `--spotify` or `-y` / `--youtube` forces one tool for every URL instead.
 - **Recorded too:** like every download, each album that succeeds is recorded in the library (artist from the file,
   `-a`, or the directory's name; `-N` turns that off). A failed album does not stop the others and is not recorded.
 - **`-m DIR`** is the target directory: it is where `mdl.json` is read from and downloaded into, and where
@@ -192,13 +194,17 @@ One JSON file, sorted and indented so it is easy to read, diff and edit by hand:
   "Daft Punk": {
     "Discovery": {
       "spotify": "https://open.spotify.com/album/2noRn2Aes5aoNVsU6iWThc",
-      "youtube": "https://music.youtube.com/playlist?list=OLAK5uy_..."
+      "youtube": "https://music.youtube.com/playlist?list=OLAK5uy_...",
+      "bandcamp": "https://daftpunk.bandcamp.com/album/..."
     }
   }
 }
 ```
 
-Each album needs at least one link. When it has both, Spotify is used unless you pass `--youtube`; with `--spotify` or `--youtube`, albums lacking that link are reported as failures and the rest continue.
+Each album needs at least one link. When it has several, Spotify is used first, then Bandcamp, then YouTube,
+unless you pass `--spotify`, `--youtube` or `--bandcamp`; albums lacking the forced link are reported as failures and
+the rest continue. Bandcamp links are downloaded with yt-dlp (spotdl cannot download from Bandcamp itself; for
+Spotify links it can still take the *audio* from Bandcamp, see the `audio` setting below).
 Unknown keys are rejected, so a typo like `"youtbe"` is reported instead of ignored.
 
 Location: `-L FILE`, else `$MDL_LIBRARY`, else `~/.config/mdl/library.json`.

@@ -39,6 +39,7 @@ func TestToolForURL(t *testing.T) {
 		"https://music.youtube.com/playlist?list=x": YtDlp,
 		"https://www.youtube.com/watch?v=x":         YtDlp,
 		"https://youtu.be/x":                        YtDlp,
+		"https://artist.bandcamp.com/album/x":       YtDlp,
 		"https://example.org/whatever":              Spotdl,
 		"https://youtube.example.org/p":             YtDlp, // contains "youtube"
 		"%%%":                                       Spotdl,
@@ -69,6 +70,7 @@ func TestCommand(t *testing.T) {
 
 func TestSelectSource(t *testing.T) {
 	both := library.Entry{Spotify: "s", YouTube: "y"}
+	all := library.Entry{Spotify: "s", YouTube: "y", Bandcamp: "b"}
 	tests := []struct {
 		name    string
 		e       library.Entry
@@ -83,6 +85,10 @@ func TestSelectSource(t *testing.T) {
 		{"forced yt-dlp", both, YtDlp, YtDlp, "y", false},
 		{"forced spotdl missing", library.Entry{YouTube: "y"}, Spotdl, Auto, "", true},
 		{"forced yt-dlp missing", library.Entry{Spotify: "s"}, YtDlp, Auto, "", true},
+		{"auto prefers bandcamp over youtube", library.Entry{YouTube: "y", Bandcamp: "b"}, Auto, YtDlp, "b", false},
+		{"auto still prefers spotify", all, Auto, Spotdl, "s", false},
+		{"forced bandcamp", all, Bandcamp, YtDlp, "b", false},
+		{"forced bandcamp missing", both, Bandcamp, Auto, "", true},
 		{"no links", library.Entry{}, Auto, Auto, "", true},
 	}
 	for _, tc := range tests {
@@ -338,6 +344,12 @@ func TestSpotdlAudioProviders(t *testing.T) {
 	_, args = LibraryCommand(Spotdl, "u", "", "", audio)
 	if got := strings.Join(args[:4], " "); got != "--audio bandcamp youtube-music --bitrate" || args[len(args)-1] != "u" {
 		t.Errorf("library args = %v", args)
+	}
+	if name, args := Command(Bandcamp, "u", nil); name != "yt-dlp" || args[len(args)-1] != "u" {
+		t.Errorf("forced bandcamp URL: %s %v", name, args)
+	}
+	if name, _ := LibraryCommand(Bandcamp, "u", "", "", nil); name != "yt-dlp" {
+		t.Errorf("forced bandcamp library URL: %s", name)
 	}
 	if _, args = Command(YtDlp, "u", audio); slices.Contains(args, "--audio") {
 		t.Error("yt-dlp must not get --audio")

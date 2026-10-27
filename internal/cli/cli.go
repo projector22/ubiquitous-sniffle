@@ -73,7 +73,8 @@ var globalOpts = []Opt{
 // Options shared by the commands that download.
 var downloadOpts = []Opt{
 	{'s', "spotify", "", "Force Spotify (spotdl). Library albums use their Spotify link and fail if they have none; URLs are handed to spotdl whatever their host."},
-	{'y', "youtube", "", "Force YouTube (yt-dlp). Library albums use their YouTube link and fail if they have none; URLs are handed to yt-dlp whatever their host. Cannot be combined with --spotify."},
+	{'y', "youtube", "", "Force YouTube (yt-dlp). Library albums use their YouTube link and fail if they have none; URLs are handed to yt-dlp whatever their host. Cannot be combined with --spotify or --bandcamp."},
+	{'B', "bandcamp", "", "Force Bandcamp (yt-dlp). Library albums use their Bandcamp link and fail if they have none; URLs are handed to yt-dlp whatever their host. Cannot be combined with --spotify or --youtube."},
 	{'b', "beet", "", "After downloading, run `beet import -C` on each downloaded folder so beets can tag and organise it."},
 	{'p', "audio", "LIST", "Where spotdl gets the audio for Spotify links, tried in order, e.g. \"bandcamp youtube-music\". Providers: youtube-music, youtube, bandcamp, soundcloud, piped. Overrides `mdl config audio`; spotdl's default is youtube-music. yt-dlp is not affected."},
 }
@@ -120,16 +121,16 @@ func (a *App) commands() []command {
 				"With --file (or plain `mdl` in a directory that has a mdl.json) the albums of a batch file are downloaded " +
 				"instead: a single-artist file into <dir>/<Album>/, where <dir> is the directory the file is in and is " +
 				"taken to be the artist's folder, a multi-artist file into <dir>/<Artist>/<Album>/. --music-dir sets that " +
-				"directory. Each URL gets the tool matching its host, so Spotify and YouTube links may be mixed. " +
+				"directory. Each URL gets the tool matching its host, so Spotify, YouTube and Bandcamp links may be mixed. " +
 				"Every URL that downloads successfully is also recorded in the library file (see --no-import), under " +
 				"--artist/--album if given, else the folder --to-library filled, else the album named after the directory " +
 				"you ran mdl in and the artist named after the directory above it. " +
 				"With no URLs, downloads albums from the library into <music-dir>/<Artist>/<Album>/; use --artist and/or " +
-				"--album to download a subset. Spotify links are preferred when an album has both; force a service with " +
-				"--spotify or --youtube. A failed album does not stop the rest.",
+				"--album to download a subset. When an album has several links, Spotify is preferred, then Bandcamp, then " +
+				"YouTube; force a service with --spotify, --youtube or --bandcamp. A failed album does not stop the rest.",
 			Opts: append(append([]Opt{}, downloadOpts...),
 				Opt{'t', "to-library", "", "For URLs: file the download under <music-dir>/<Artist>/<Album>/ instead of the current directory. Artist and album come from the tracks' metadata; missing ones become \"Unknown Artist\" / \"Unknown Album\". With --beet only the new album folders are imported."},
-				Opt{'f', "file", "FILE", "Download the albums listed in a batch file (see `mdl import`) instead of the library: {\"Album\": \"url\"} for one artist, whose folder is the directory the file is in, or {\"Artist\": {\"Album\": \"url\"}}. Each URL uses the right tool for its host unless --spotify or --youtube forces one. Plain `mdl` does this for ./mdl.json when it exists."},
+				Opt{'f', "file", "FILE", "Download the albums listed in a batch file (see `mdl import`) instead of the library: {\"Album\": \"url\"} for one artist, whose folder is the directory the file is in, or {\"Artist\": {\"Album\": \"url\"}}. Each URL uses the right tool for its host unless --spotify, --youtube or --bandcamp forces one. Plain `mdl` does this for ./mdl.json when it exists."},
 				Opt{'d', "delete", "", "With --file: delete the batch file once every album has downloaded successfully."},
 				Opt{'N', "no-import", "", "Do not record downloaded URLs in the library file. By default every URL you download is recorded there."},
 				Opt{'a', "artist", "NAME", "Library downloads: only this artist's albums (case-insensitive). With URLs: the artist the download is recorded under (and, with --to-library, the artist folder)."},
@@ -139,6 +140,7 @@ func (a *App) commands() []command {
 				`mdl download -a "Daft Punk" -A Discovery`,
 				"mdl download -yb https://music.youtube.com/playlist?list=...",
 				"mdl https://open.spotify.com/album/...",
+				"mdl https://artist.bandcamp.com/album/...        yt-dlp downloads Bandcamp links",
 				"mdl                                      download ./mdl.json, if there is one",
 				"mdl -m ~/Music/Abba                      download ~/Music/Abba/mdl.json into that folder",
 				"mdl download --file albums.json -d       download a batch file, then delete it",
@@ -150,12 +152,12 @@ func (a *App) commands() []command {
 		{
 			Name: "add", Args: "-a ARTIST -A ALBUM -u URL...",
 			Summary: "Add or update an album in the library",
-			Long: "Stores a Spotify and/or YouTube link for an album. The service is detected from the URL. " +
-				"Give --url twice to store both. Adding an existing album updates its links.",
+			Long: "Stores a Spotify, YouTube and/or Bandcamp link for an album. The service is detected from the URL. " +
+				"Give --url more than once to store several. Adding an existing album updates its links.",
 			Opts: []Opt{
 				{'a', "artist", "NAME", "Artist name (required)."},
 				{'A', "album", "NAME", "Album name (required)."},
-				{'u', "url", "URL", "Spotify or YouTube / YouTube Music link. May be repeated, once per service (required)."},
+				{'u', "url", "URL", "Spotify, YouTube / YouTube Music or Bandcamp link. May be repeated, once per service (required)."},
 			},
 			Examples: []string{`mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...`},
 			run:      a.cmdAdd,
@@ -497,15 +499,20 @@ func (a *App) loadLibrary(inv *invocation) (*library.Library, int) {
 }
 
 func forcedTool(v *Values) (downloader.Tool, error) {
-	switch s, y := v.Bool("spotify"), v.Bool("youtube"); {
-	case s && y:
-		return downloader.Auto, usagef("--spotify and --youtube cannot be used together")
-	case s:
-		return downloader.Spotdl, nil
-	case y:
-		return downloader.YtDlp, nil
+	forced := downloader.Auto
+	for _, f := range []struct {
+		flag string
+		tool downloader.Tool
+	}{{"spotify", downloader.Spotdl}, {"youtube", downloader.YtDlp}, {"bandcamp", downloader.Bandcamp}} {
+		if !v.Bool(f.flag) {
+			continue
+		}
+		if forced != downloader.Auto {
+			return downloader.Auto, usagef("only one of --spotify, --youtube and --bandcamp can be used")
+		}
+		forced = f.tool
 	}
-	return downloader.Auto, nil
+	return forced, nil
 }
 
 func (a *App) cmdHelp(inv *invocation) int {
@@ -614,7 +621,7 @@ func (a *App) downloadURLs(inv *invocation, forced downloader.Tool, toLibrary bo
 		}
 		if !inv.vals.Bool("no-import") {
 			if _, cerr := library.ClassifyURL(u); cerr != nil {
-				// Downloaded fine, but only Spotify / YouTube links can be stored.
+				// Downloaded fine, but only Spotify / YouTube / Bandcamp links can be stored.
 				fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", cerr)
 			} else if err := a.recordURL(inv, u, landed, toLibrary, fallbackDir); err != nil {
 				fmt.Fprintf(a.Stderr, "mdl: not recorded in the library: %v\n", err)
@@ -659,7 +666,7 @@ func recordNames(flagArtist, flagAlbum string, landed []string, fallbackDir stri
 	return artist, album
 }
 
-// recordURL stores rawURL (a Spotify or YouTube link) in the library file
+// recordURL stores rawURL (a Spotify, YouTube or Bandcamp link) in the library file
 // under the names chosen by recordNames.
 func (a *App) recordURL(inv *invocation, rawURL string, landed []string, toLibrary bool, fallbackDir string) error {
 	var entry library.Entry
@@ -684,7 +691,8 @@ func (a *App) storeEntry(inv *invocation, artist, album string, entry library.En
 		if al, ok := lib.ResolveAlbum(canon, album); ok {
 			old, _ := lib.Get(canon, al)
 			if old.Spotify != "" && entry.Spotify != "" && old.Spotify != entry.Spotify ||
-				old.YouTube != "" && entry.YouTube != "" && old.YouTube != entry.YouTube {
+				old.YouTube != "" && entry.YouTube != "" && old.YouTube != entry.YouTube ||
+				old.Bandcamp != "" && entry.Bandcamp != "" && old.Bandcamp != entry.Bandcamp {
 				fmt.Fprintf(a.Stderr, "mdl: replacing the existing link for %s / %s in the library\n", canon, al)
 			}
 		}
@@ -722,10 +730,8 @@ func (a *App) downloadBatch(inv *invocation, path string, forced downloader.Tool
 	items := make([]downloader.Item, 0, len(entries))
 	usedDefault := false
 	for _, e := range entries {
-		it := downloader.Item{Artist: e.Artist, Album: e.Album, URL: e.Entry.Spotify}
-		if it.URL == "" {
-			it.URL = e.Entry.YouTube
-		}
+		// A batch entry holds exactly one link.
+		it := downloader.Item{Artist: e.Artist, Album: e.Album, URL: e.Entry.Spotify + e.Entry.YouTube + e.Entry.Bandcamp}
 		if e.Artist == "" {
 			usedDefault = true
 			it.Artist = artist
@@ -882,6 +888,9 @@ func linkNames(e library.Entry) string {
 	if e.YouTube != "" {
 		n = append(n, "youtube")
 	}
+	if e.Bandcamp != "" {
+		n = append(n, "bandcamp")
+	}
 	return strings.Join(n, ", ")
 }
 
@@ -915,6 +924,9 @@ func (a *App) cmdList(inv *invocation) int {
 				}
 				if e.YouTube != "" {
 					fmt.Fprintf(a.Stdout, "  %s    youtube %s\n", pad, e.YouTube)
+				}
+				if e.Bandcamp != "" {
+					fmt.Fprintf(a.Stdout, "  %s    bandcamp %s\n", pad, e.Bandcamp)
 				}
 			}
 		}

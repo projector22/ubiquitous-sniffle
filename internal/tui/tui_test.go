@@ -542,7 +542,7 @@ func TestHelpers(t *testing.T) {
 	if clamp(5, 0, 3) != 3 || clamp(-1, 0, 3) != 0 || clamp(1, 0, -1) != 0 {
 		t.Error("clamp")
 	}
-	if badges(library.Entry{Spotify: "s"}) != "S -" || badges(library.Entry{YouTube: "y"}) != "- Y" {
+	if badges(library.Entry{Spotify: "s"}) != "S - -" || badges(library.Entry{YouTube: "y"}) != "- Y -" || badges(library.Entry{Bandcamp: "b"}) != "- - B" {
 		t.Error("badges")
 	}
 	if (rect{1, 1, 2, 2}).contains(3, 1) {
@@ -564,5 +564,21 @@ func TestUpdateIgnoresUnknownMessages(t *testing.T) {
 	next, cmd := m.Update(struct{}{})
 	if next != m || cmd != nil || m.Done() {
 		t.Error("unknown messages must be ignored")
+	}
+}
+
+func TestViewBandcamp(t *testing.T) {
+	l := library.New()
+	if err := l.Add("Artist", "Album", library.Entry{Bandcamp: "https://a.bandcamp.com/album/x"}); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(l, nil)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	if v := screen(m); !strings.Contains(v, "0 Spotify, 0 YouTube, 1 Bandcamp") {
+		t.Errorf("artist summary:\n%s", v)
+	}
+	press(m, "l")
+	if v := screen(m); !strings.Contains(v, "- - B") || !strings.Contains(v, "https://a.bandcamp.com/album/x") {
+		t.Errorf("album details:\n%s", v)
 	}
 }

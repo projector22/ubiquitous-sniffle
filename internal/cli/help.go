@@ -78,7 +78,7 @@ func (a *App) topHelp() string {
 		"  mdl [OPTIONS] URL...                          download URLs into the current directory\n" +
 		"  mdl [GLOBAL OPTIONS] <command> [OPTIONS] [ARGUMENTS]\n  mdl <command> --help\n\n")
 	b.WriteString("DESCRIPTION\n")
-	b.WriteString(paragraph("mdl keeps one library file that maps artist -> album -> Spotify / YouTube link, " +
+	b.WriteString(paragraph("mdl keeps one library file that maps artist -> album -> Spotify / YouTube / Bandcamp link, " +
 		"downloads those albums with spotdl or yt-dlp into <music-dir>/<Artist>/<Album>/, " +
 		"and can hand the results to beets (beet) for tagging. Every option has a long form " +
 		"(--like-this) and a short form (-l); short flags can be combined (-sb) and values " +
@@ -98,13 +98,14 @@ func (a *App) topHelp() string {
 	b.WriteString(formatOpts(globalOpts))
 	b.WriteString("\nLIBRARY FORMAT\n")
 	b.WriteString(paragraph("The library is a single JSON file. Keys are sorted and indented so it is easy to read, " +
-		"diff and edit by hand (`mdl edit`). Each album needs at least one of \"spotify\" or \"youtube\":"))
+		"diff and edit by hand (`mdl edit`). Each album needs at least one of \"spotify\", \"youtube\" or \"bandcamp\":"))
 	b.WriteString(`
     {
       "Daft Punk": {
         "Discovery": {
           "spotify": "https://open.spotify.com/album/2noRn2Aes5aoNVsU6iWThc",
-          "youtube": "https://music.youtube.com/playlist?list=OLAK5uy_..."
+          "youtube": "https://music.youtube.com/playlist?list=OLAK5uy_...",
+          "bandcamp": "https://daftpunk.bandcamp.com/album/..."
         }
       }
     }

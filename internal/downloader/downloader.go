@@ -26,17 +26,19 @@ import (
 // Tool names an external downloader.
 type Tool string
 
-// Supported tools. Auto means "pick for me".
+// Supported tools. Auto means "pick for me". Bandcamp is not a program of its
+// own: it forces an album's Bandcamp link, which yt-dlp downloads.
 const (
-	Auto   Tool = ""
-	Spotdl Tool = "spotdl"
-	YtDlp  Tool = "yt-dlp"
+	Auto     Tool = ""
+	Spotdl   Tool = "spotdl"
+	YtDlp    Tool = "yt-dlp"
+	Bandcamp Tool = "bandcamp"
 )
 
 // ToolForURL picks a downloader from the URL's host: YouTube / YouTube Music
-// links go to yt-dlp, everything else (Spotify) to spotdl.
+// and Bandcamp links go to yt-dlp, everything else (Spotify) to spotdl.
 func ToolForURL(raw string) Tool {
-	if src, err := library.ClassifyURL(raw); err == nil && src == library.SourceYouTube {
+	if src, err := library.ClassifyURL(raw); err == nil && (src == library.SourceYouTube || src == library.SourceBandcamp) {
 		return YtDlp
 	}
 	if u, err := url.Parse(raw); err == nil && strings.Contains(strings.ToLower(u.Hostname()), "youtube") {
@@ -72,7 +74,7 @@ func ParseAudio(s string) ([]string, error) {
 // it. Arguments are passed as an argv slice, never through a shell, so URLs
 // with '&' or spaces are safe.
 func Command(t Tool, rawURL string, audio []string) (string, []string) {
-	if t == YtDlp {
+	if t == YtDlp || t == Bandcamp {
 		return ytdlp("%(playlist_index)02d - %(artist)s - %(title)s.%(ext)s", rawURL)
 	}
 	return "spotdl", spotdlArgs(audio, "download", rawURL)
@@ -121,7 +123,7 @@ const (
 // Track numbers are zero-padded when the source is a playlist or album.
 // audio is as for Command.
 func LibraryCommand(t Tool, rawURL, artist, album string, audio []string) (string, []string) {
-	if t == YtDlp {
+	if t == YtDlp || t == Bandcamp {
 		artistPart := "%(album_artist,artist,creator|" + UnknownArtist + ")s"
 		if artist != "" {
 			artistPart = strings.ReplaceAll(SanitizeName(artist), "%", "%%")
@@ -147,7 +149,7 @@ func LibraryCommand(t Tool, rawURL, artist, album string, audio []string) (strin
 }
 
 // SelectSource chooses which of an entry's links to use. When forced is Auto,
-// Spotify is preferred and YouTube is the fallback.
+// Spotify is preferred, then Bandcamp (the artist's own upload), then YouTube.
 func SelectSource(e library.Entry, forced Tool) (Tool, string, error) {
 	switch forced {
 	case Spotdl:
@@ -160,10 +162,17 @@ func SelectSource(e library.Entry, forced Tool) (Tool, string, error) {
 			return Auto, "", errors.New("no YouTube link (remove --youtube or add one)")
 		}
 		return YtDlp, e.YouTube, nil
+	case Bandcamp:
+		if e.Bandcamp == "" {
+			return Auto, "", errors.New("no Bandcamp link (remove --bandcamp or add one)")
+		}
+		return YtDlp, e.Bandcamp, nil
 	}
 	switch {
 	case e.Spotify != "":
 		return Spotdl, e.Spotify, nil
+	case e.Bandcamp != "":
+		return YtDlp, e.Bandcamp, nil
 	case e.YouTube != "":
 		return YtDlp, e.YouTube, nil
 	}
@@ -344,8 +353,8 @@ type ItemResult struct {
 }
 
 // DownloadItems downloads each item into its own directory. Each URL gets
-// the right tool for its host, so a batch may freely mix Spotify and YouTube
-// links; a non-Auto forced tool overrides that for every item. A failing item
+// the right tool for its host, so a batch may freely mix Spotify, YouTube and
+// Bandcamp links; a non-Auto forced tool overrides that for every item. A failing item
 // is recorded and the rest continue; cancelling ctx stops early.
 func (d *Downloader) DownloadItems(ctx context.Context, items []Item, forced Tool) []ItemResult {
 	results := make([]ItemResult, 0, len(items))

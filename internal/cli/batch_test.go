@@ -329,7 +329,7 @@ func TestBatchProblems(t *testing.T) {
 	if !strings.Contains(h.out.String(), "Nothing to download") || len(h.fake.Calls) != 0 {
 		t.Errorf("out = %q calls = %+v", h.out, h.fake.Calls)
 	}
-	// Invalid JSON, and a URL that is neither Spotify nor YouTube: nothing is downloaded.
+	// Invalid JSON, and a URL that is not Spotify, YouTube or Bandcamp: nothing is downloaded.
 	for _, content := range []string{`{bad`, `{"X": "https://example.com/x"}`, `[]`} {
 		writeFile(t, file, content)
 		h.expect(t, 1)
@@ -554,7 +554,7 @@ func TestHelpMentionsBatchDownloadAndOldLog(t *testing.T) {
 		}
 	}
 	dl := strings.Join(strings.Fields(a.commandHelp(a.find("download"))), " ")
-	for _, want := range []string{"--file", "--delete", "mdl.json", "Spotify and YouTube links may be mixed"} {
+	for _, want := range []string{"--file", "--delete", "mdl.json", "Spotify, YouTube and Bandcamp links may be mixed"} {
 		if !strings.Contains(dl, want) {
 			t.Errorf("download help missing %q", want)
 		}

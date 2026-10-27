@@ -4,6 +4,10 @@
 
 ### Added
 
+- Bandcamp links: the library, `mdl add`, `mdl import`, batch files and `mdl URL` accept `*.bandcamp.com` links
+  (stored as `"bandcamp"`) and download them with yt-dlp. Albums with several links use Spotify, then Bandcamp,
+  then YouTube; `-B` / `--bandcamp` forces the Bandcamp link. The TUI and `mdl list` show them. Previously a
+  Bandcamp link made `mdl import` reject the whole file.
 - Bandcamp as an audio source for spotdl: `mdl config audio "bandcamp youtube-music"` or `-p` / `--audio LIST` on
   `download`, `tui` and plain `mdl` passes `--audio` to spotdl, so Spotify links are matched to Bandcamp audio first,
   falling back to the next provider. Also accepts `youtube`, `soundcloud` and `piped`.

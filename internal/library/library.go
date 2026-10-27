@@ -6,7 +6,8 @@
 //	  "Daft Punk": {
 //	    "Discovery": {
 //	      "spotify": "https://open.spotify.com/album/...",
-//	      "youtube": "https://music.youtube.com/playlist?list=..."
+//	      "youtube": "https://music.youtube.com/playlist?list=...",
+//	      "bandcamp": "https://daftpunk.bandcamp.com/album/..."
 //	    }
 //	  }
 //	}
@@ -33,12 +34,13 @@ import (
 // Entry holds the download links for one album. At least one link must be set
 // for the entry to be downloadable.
 type Entry struct {
-	Spotify string `json:"spotify,omitempty"`
-	YouTube string `json:"youtube,omitempty"`
+	Spotify  string `json:"spotify,omitempty"`
+	YouTube  string `json:"youtube,omitempty"`
+	Bandcamp string `json:"bandcamp,omitempty"`
 }
 
 // Empty reports whether the entry has no links at all.
-func (e Entry) Empty() bool { return e.Spotify == "" && e.YouTube == "" }
+func (e Entry) Empty() bool { return e.Spotify == "" && e.YouTube == "" && e.Bandcamp == "" }
 
 // Source identifies which service a URL belongs to.
 type Source int
@@ -48,6 +50,7 @@ const (
 	SourceUnknown Source = iota
 	SourceSpotify
 	SourceYouTube
+	SourceBandcamp
 )
 
 // String returns a lower-case name for the source.
@@ -57,12 +60,14 @@ func (s Source) String() string {
 		return "spotify"
 	case SourceYouTube:
 		return "youtube"
+	case SourceBandcamp:
+		return "bandcamp"
 	}
 	return "unknown"
 }
 
-// ClassifyURL decides whether raw is a Spotify or YouTube (incl. YouTube
-// Music) link. Anything else is an error.
+// ClassifyURL decides whether raw is a Spotify, YouTube (incl. YouTube
+// Music) or Bandcamp link. Anything else is an error.
 func ClassifyURL(raw string) (Source, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
@@ -74,8 +79,10 @@ func ClassifyURL(raw string) (Source, error) {
 		return SourceSpotify, nil
 	case host == "youtube.com" || strings.HasSuffix(host, ".youtube.com") || host == "youtu.be":
 		return SourceYouTube, nil
+	case host == "bandcamp.com" || strings.HasSuffix(host, ".bandcamp.com"):
+		return SourceBandcamp, nil
 	}
-	return SourceUnknown, fmt.Errorf("%q is neither a Spotify nor a YouTube link", raw)
+	return SourceUnknown, fmt.Errorf("%q is not a Spotify, YouTube or Bandcamp link", raw)
 }
 
 // SetURL classifies raw and stores it in the matching field of e.
@@ -85,9 +92,12 @@ func (e *Entry) SetURL(raw string) error {
 		return err
 	}
 	raw = strings.TrimSpace(raw)
-	if src == SourceSpotify {
+	switch src {
+	case SourceSpotify:
 		e.Spotify = raw
-	} else {
+	case SourceBandcamp:
+		e.Bandcamp = raw
+	default:
 		e.YouTube = raw
 	}
 	return nil
@@ -236,7 +246,7 @@ func (l *Library) Add(artist, album string, e Entry) error {
 	case album == "":
 		return errors.New("album name is required")
 	case e.Empty():
-		return errors.New("at least one Spotify or YouTube link is required")
+		return errors.New("at least one Spotify, YouTube or Bandcamp link is required")
 	}
 	if a, ok := l.ResolveArtist(artist); ok {
 		artist = a
@@ -253,6 +263,9 @@ func (l *Library) Add(artist, album string, e Entry) error {
 	}
 	if e.YouTube != "" {
 		cur.YouTube = e.YouTube
+	}
+	if e.Bandcamp != "" {
+		cur.Bandcamp = e.Bandcamp
 	}
 	l.data[artist][album] = cur
 	return nil

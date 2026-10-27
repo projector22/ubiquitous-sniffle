@@ -538,14 +538,17 @@ func (m *Model) renderPane(r rect, title string, lines []string, focused bool) s
 }
 
 func badges(e library.Entry) string {
-	s, y := "-", "-"
+	s, y, b := "-", "-", "-"
 	if e.Spotify != "" {
 		s = "S"
 	}
 	if e.YouTube != "" {
 		y = "Y"
 	}
-	return s + " " + y
+	if e.Bandcamp != "" {
+		b = "B"
+	}
+	return s + " " + y + " " + b
 }
 
 func visible[T any](items []T, top, n int) []T {
@@ -613,6 +616,9 @@ func (m *Model) detailLines(width int) []string {
 		add(styAccent, "YouTube")
 		add(plain, orNone(e.YouTube))
 		blank()
+		add(styAccent, "Bandcamp")
+		add(plain, orNone(e.Bandcamp))
+		blank()
 		add(styAccent, "Folder")
 		add(plain, downloader.SanitizeName(artist)+"/"+downloader.SanitizeName(album))
 		blank()
@@ -621,7 +627,7 @@ func (m *Model) detailLines(width int) []string {
 	}
 
 	n := len(m.albums)
-	sp, yt := 0, 0
+	sp, yt, bc := 0, 0, 0
 	for _, al := range m.albums {
 		e, _ := m.lib.Get(artist, al)
 		if e.Spotify != "" {
@@ -630,12 +636,15 @@ func (m *Model) detailLines(width int) []string {
 		if e.YouTube != "" {
 			yt++
 		}
+		if e.Bandcamp != "" {
+			bc++
+		}
 	}
 	add(styHeading, artist)
 	add(styDim, fmt.Sprintf("%d album%s", n, plural(n)))
 	blank()
 	add(styAccent, "Links")
-	add(plain, fmt.Sprintf("%d Spotify, %d YouTube", sp, yt))
+	add(plain, fmt.Sprintf("%d Spotify, %d YouTube, %d Bandcamp", sp, yt, bc))
 	blank()
 	add(styAccent, "Folder")
 	add(plain, downloader.SanitizeName(artist)+"/")

@@ -22,7 +22,7 @@ type Dep struct {
 // Managed are the tools `mdl install` can install via pipx or pip.
 var Managed = []Dep{
 	{Binary: "beet", Package: "beets", Purpose: "tags and organises your library (beets)"},
-	{Binary: "yt-dlp", Package: "yt-dlp", Purpose: "downloads from YouTube / YouTube Music"},
+	{Binary: "yt-dlp", Package: "yt-dlp", Purpose: "downloads from YouTube / YouTube Music and Bandcamp"},
 	{Binary: "spotdl", Package: "spotdl", Purpose: "downloads Spotify tracks via YouTube"},
 }
 
