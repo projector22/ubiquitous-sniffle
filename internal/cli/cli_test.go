@@ -40,7 +40,7 @@ func newHarness(t *testing.T) *harness {
 		Home:     dir,
 		Runner:   h.fake,
 		LookPath: func(n string) (string, error) { return "", errors.New("not found") },
-		TUI:      func(*library.Library) (tui.Result, error) { return tui.Result{}, nil },
+		TUI:      func(*library.Library, func() error) (tui.Result, error) { return tui.Result{}, nil },
 	}
 	return h
 }
@@ -517,7 +517,7 @@ func TestTUICommand(t *testing.T) {
 		t.Error("quitting the TUI must not download")
 	}
 	// Download a single album, then beet it.
-	h.app.TUI = func(l *library.Library) (tui.Result, error) {
+	h.app.TUI = func(l *library.Library, _ func() error) (tui.Result, error) {
 		if l.NumAlbums() != 3 {
 			t.Errorf("TUI got a library with %d albums", l.NumAlbums())
 		}
@@ -528,7 +528,7 @@ func TestTUICommand(t *testing.T) {
 		t.Errorf("calls = %+v", h.fake.Calls)
 	}
 	// Whole artist.
-	h.app.TUI = func(*library.Library) (tui.Result, error) {
+	h.app.TUI = func(*library.Library, func() error) (tui.Result, error) {
 		return tui.Result{Action: tui.ActionDownload, Artist: "Daft Punk"}, nil
 	}
 	h.expect(t, 0, "tui", "-y")
@@ -536,11 +536,24 @@ func TestTUICommand(t *testing.T) {
 		t.Errorf("calls = %+v", h.fake.Calls)
 	}
 	// Stale selection and TUI errors.
-	h.app.TUI = func(*library.Library) (tui.Result, error) {
+	h.app.TUI = func(*library.Library, func() error) (tui.Result, error) {
 		return tui.Result{Action: tui.ActionDownload, Artist: "Gone"}, nil
 	}
 	h.expect(t, 1, "tui")
-	h.app.TUI = func(*library.Library) (tui.Result, error) { return tui.Result{}, errors.New("no tty") }
+	// Deletes made in the TUI are saved to the library file (but not on a dry run).
+	h.app.TUI = func(l *library.Library, save func() error) (tui.Result, error) {
+		l.RemoveArtist("Daft Punk")
+		return tui.Result{}, save()
+	}
+	h.expect(t, 0, "tui", "-n")
+	if l, _ := library.Load(h.libPath); l.NumAlbums() != 3 {
+		t.Errorf("dry run saved the library: %d albums", l.NumAlbums())
+	}
+	h.expect(t, 0, "tui")
+	if l, _ := library.Load(h.libPath); l.NumAlbums() != 1 {
+		t.Errorf("delete not saved: %d albums", l.NumAlbums())
+	}
+	h.app.TUI = func(*library.Library, func() error) (tui.Result, error) { return tui.Result{}, errors.New("no tty") }
 	h.expect(t, 1, "tui")
 	if !strings.Contains(h.err.String(), "no tty") {
 		t.Errorf("stderr = %q", h.err)

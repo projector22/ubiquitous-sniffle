@@ -280,6 +280,41 @@ func (l *Library) Get(artist, album string) (Entry, bool) {
 	return e, ok
 }
 
+// Remove deletes an exact artist/album pair and reports whether it existed.
+// An artist left without albums is removed too.
+func (l *Library) Remove(artist, album string) bool {
+	if _, ok := l.data[artist][album]; !ok {
+		return false
+	}
+	delete(l.data[artist], album)
+	if len(l.data[artist]) == 0 {
+		delete(l.data, artist)
+	}
+	return true
+}
+
+// RemoveArtist deletes an artist (exact name) with all of its albums and
+// reports whether it existed.
+func (l *Library) RemoveArtist(artist string) bool {
+	if _, ok := l.data[artist]; !ok {
+		return false
+	}
+	delete(l.data, artist)
+	return true
+}
+
+// Clone returns a deep copy of the library.
+func (l *Library) Clone() *Library {
+	c := New()
+	for artist, albums := range l.data {
+		c.data[artist] = make(map[string]Entry, len(albums))
+		for album, e := range albums {
+			c.data[artist][album] = e
+		}
+	}
+	return c
+}
+
 // Artists returns all artist names, sorted case-insensitively.
 func (l *Library) Artists() []string { return sortedKeys(l.data) }
 

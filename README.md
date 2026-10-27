@@ -95,7 +95,7 @@ stored, it is replaced and mdl says so. Recorded entries can be fixed later with
 mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
 mdl add -a "Daft Punk" -A Discovery -u https://music.youtube.com/playlist?list=...   # adds the YouTube link too
 mdl list -u                       # tree of everything (-u also prints links)
-mdl tui                           # browse; press d to download the selection
+mdl tui                           # browse; press d to download the selection, x to delete it
 mdl download                      # every album in the library
 mdl download -a "Daft Punk" -sb   # one artist, force Spotify links, then run beet on each folder
 mdl download --youtube            # use each album's YouTube link instead
@@ -240,9 +240,10 @@ overwritten.
 | `/` | filter by artist or album name (`Esc` clears) |
 | `g` `G` / `Home` `End` / `PgUp` `PgDn` | jump |
 | `d` | download the selected album (or all of the artist's albums) and exit the TUI |
+| `x` / `Delete` | delete the selected album (or the artist and all its albums) from the library, after a `y` to confirm |
 | `q` / `Esc` / `Ctrl-C` | quit |
 
-Bubble Tea handles raw mode, mouse and resizing, so it works on Linux, macOS and Windows terminals. Pressing `d` closes the TUI first and then runs the download, so spotdl / yt-dlp / beet get a normal terminal (beet's prompts work).
+Bubble Tea handles raw mode, mouse and resizing, so it works on Linux, macOS and Windows terminals. Pressing `d` closes the TUI first and then runs the download, so spotdl / yt-dlp / beet get a normal terminal (beet's prompts work). A delete is written to the library file straight away (not with `-n`); downloaded music on disk is left alone.
 
 ### Migrating from the shell script
 

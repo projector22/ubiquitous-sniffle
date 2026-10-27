@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func testLib(t *testing.T) *library.Library {
 // model returns a sized model (4 artists: ABBA, AC/DC, Daft Punk, 宇多田ヒカル).
 func model(t *testing.T, w, h int) *Model {
 	t.Helper()
-	m := NewModel(testLib(t))
+	m := NewModel(testLib(t), nil)
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	return m
 }
@@ -142,7 +143,7 @@ func TestScrollingKeepsSelectionVisible(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		_ = l.Add(string(rune('A'+i/26))+string(rune('a'+i%26)), "Album", library.Entry{Spotify: "s"})
 	}
-	m := NewModel(l)
+	m := NewModel(l, nil)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
 	rows := m.innerRows()
 	for i := 0; i < 30; i++ {
@@ -207,11 +208,77 @@ func TestDownloadSelection(t *testing.T) {
 		t.Errorf("album download: %+v", r)
 	}
 
-	m = NewModel(library.New())
+	m = NewModel(library.New(), nil)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	press(m, "d")
 	if m.Done() || !strings.Contains(screen(m), "nothing selected") {
 		t.Error("download on an empty library should show a status, not exit")
+	}
+}
+
+func TestDeleteAlbum(t *testing.T) {
+	m := model(t, 100, 30)
+	saves := 0
+	m.save = func() error { saves++; return nil }
+	press(m, "down", "down", "l", "x") // Daft Punk / Discovery
+	if v := screen(m); !strings.Contains(v, "delete album Discovery by Daft Punk? y/n") {
+		t.Errorf("missing confirmation:\n%s", v)
+	}
+	press(m, "n")
+	if _, ok := m.lib.Get("Daft Punk", "Discovery"); !ok || saves != 0 || !strings.Contains(screen(m), "nothing deleted") {
+		t.Error("anything but y must cancel")
+	}
+	press(m, "x", "y")
+	if _, ok := m.lib.Get("Daft Punk", "Discovery"); ok || saves != 1 {
+		t.Errorf("album not deleted (saves=%d)", saves)
+	}
+	if m.focus != paneAlbums || m.SelectedAlbum() != "Homework" || !strings.Contains(screen(m), "deleted Discovery by Daft Punk") {
+		t.Errorf("after delete: focus=%v album=%q\n%s", m.focus, m.SelectedAlbum(), screen(m))
+	}
+	// Deleting the last album removes the artist and moves to the next one.
+	press(m, "delete", "y")
+	if _, ok := m.lib.ResolveArtist("Daft Punk"); ok || m.focus != paneArtists || m.SelectedArtist() != "宇多田ヒカル" {
+		t.Errorf("after last album: focus=%v artist=%q", m.focus, m.SelectedArtist())
+	}
+}
+
+func TestDeleteArtist(t *testing.T) {
+	m := model(t, 100, 30)
+	press(m, "end", "x")
+	if v := screen(m); !strings.Contains(v, "delete artist 宇多田ヒカル and its 1 album? y/n") {
+		t.Errorf("missing confirmation:\n%s", v)
+	}
+	click(m, 1, 3) // ignored while confirming
+	press(m, "Y")
+	if m.lib.NumArtists() != 3 || m.SelectedArtist() != "Daft Punk" {
+		t.Errorf("artists=%d selected=%q", m.lib.NumArtists(), m.SelectedArtist())
+	}
+	press(m, "home", "x")
+	if v := screen(m); !strings.Contains(v, "delete artist ABBA and its 1 album? y/n") {
+		t.Errorf("missing confirmation:\n%s", v)
+	}
+	press(m, "y")
+	if m.SelectedArtist() != "AC/DC" {
+		t.Errorf("selected %q", m.SelectedArtist())
+	}
+
+	m = NewModel(library.New(), nil)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	press(m, "x")
+	if m.confirming || !strings.Contains(screen(m), "nothing selected") {
+		t.Error("delete on an empty library should show a status")
+	}
+}
+
+func TestDeleteSaveFailureRestores(t *testing.T) {
+	m := model(t, 100, 30)
+	m.save = func() error { return errors.New("disk full") }
+	press(m, "x", "y")
+	if m.lib.NumArtists() != 4 || m.lib.NumAlbums() != 5 || m.SelectedArtist() != "ABBA" {
+		t.Errorf("library not restored: %d/%d", m.lib.NumArtists(), m.lib.NumAlbums())
+	}
+	if !strings.Contains(screen(m), "delete failed: disk full") {
+		t.Errorf("missing error:\n%s", screen(m))
 	}
 }
 
@@ -414,7 +481,7 @@ func TestViewWideCharactersStayAligned(t *testing.T) {
 func TestViewLongNamesAreTruncated(t *testing.T) {
 	l := library.New()
 	_ = l.Add(strings.Repeat("Very Long Artist ", 10), strings.Repeat("Long Album ", 10), library.Entry{Spotify: "https://open.spotify.com/album/" + strings.Repeat("x", 200)})
-	m := NewModel(l)
+	m := NewModel(l, nil)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	press(m, "l")
 	assertFrame(t, m, 80, 20)
@@ -426,7 +493,7 @@ func TestViewLongNamesAreTruncated(t *testing.T) {
 func TestViewSanitisesHostileNames(t *testing.T) {
 	l := library.New()
 	_ = l.Add("Evil\x1b[2J\nArtist", "Al\x07bum", library.Entry{Spotify: "https://open.spotify.com/a\x1b[31m"})
-	m := NewModel(l)
+	m := NewModel(l, nil)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	press(m, "l")
 	if strings.ContainsAny(screen(m), "\x1b\x07") {
@@ -436,7 +503,7 @@ func TestViewSanitisesHostileNames(t *testing.T) {
 }
 
 func TestViewEmptyBeforeSizeAndTooSmall(t *testing.T) {
-	m := NewModel(testLib(t))
+	m := NewModel(testLib(t), nil)
 	if m.View() != "" {
 		t.Error("nothing to draw before the first WindowSizeMsg")
 	}
@@ -444,7 +511,7 @@ func TestViewEmptyBeforeSizeAndTooSmall(t *testing.T) {
 	if v := screen(m); !strings.Contains(v, "Terminal too small") {
 		t.Errorf("small terminal view: %q", v)
 	}
-	m = NewModel(library.New())
+	m = NewModel(library.New(), nil)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	if v := screen(m); !strings.Contains(v, "library is empty") {
 		t.Errorf("missing empty message:\n%s", v)

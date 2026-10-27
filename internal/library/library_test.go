@@ -140,6 +140,29 @@ func TestSortingAndResolve(t *testing.T) {
 	}
 }
 
+func TestRemoveAndClone(t *testing.T) {
+	l := sample(t)
+	c := l.Clone()
+	if l.Remove("Daft Punk", "nope") || l.Remove("nobody", "Discovery") || l.RemoveArtist("nobody") {
+		t.Error("removing something missing should report false")
+	}
+	if !l.Remove("Daft Punk", "Homework") || l.NumAlbums() != 3 || l.NumArtists() != 3 {
+		t.Errorf("after album remove: %d artists, %d albums", l.NumArtists(), l.NumAlbums())
+	}
+	if !l.Remove("Zebra", "Stripes") {
+		t.Error("Remove(Zebra, Stripes) = false")
+	}
+	if _, ok := l.ResolveArtist("Zebra"); ok {
+		t.Error("an artist without albums should be removed")
+	}
+	if !l.RemoveArtist("Daft Punk") || l.NumArtists() != 1 || l.NumAlbums() != 1 {
+		t.Errorf("after artist remove: %d artists, %d albums", l.NumArtists(), l.NumAlbums())
+	}
+	if c.NumArtists() != 3 || c.NumAlbums() != 4 {
+		t.Errorf("clone changed with the original: %d/%d", c.NumArtists(), c.NumAlbums())
+	}
+}
+
 func TestSortedKeysTieBreak(t *testing.T) {
 	got := sortedKeys(map[string]int{"b": 1, "B": 1, "a": 1})
 	if want := []string{"a", "B", "b"}; !reflect.DeepEqual(got, want) {

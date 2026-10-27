@@ -39,9 +39,9 @@ type App struct {
 	Stderr   io.Writer
 	Getenv   func(string) string
 	Home     string
-	Runner   runner.Runner                              // runs external tools
-	LookPath func(string) (string, error)               // finds executables
-	TUI      func(*library.Library) (tui.Result, error) // interactive browser
+	Runner   runner.Runner                                            // runs external tools
+	LookPath func(string) (string, error)                             // finds executables
+	TUI      func(*library.Library, func() error) (tui.Result, error) // interactive browser; the func saves the library
 }
 
 // NewApp returns an App connected to the real process environment.
@@ -928,7 +928,13 @@ func (a *App) cmdTUI(inv *invocation) int {
 	if lib.NumAlbums() == 0 {
 		return a.fail("the library is empty; add albums with `mdl add` first")
 	}
-	res, err := a.TUI(lib)
+	save := func() error {
+		if inv.dry {
+			return nil
+		}
+		return lib.Save(inv.libPath)
+	}
+	res, err := a.TUI(lib, save)
 	if err != nil {
 		return a.fail("%v", err)
 	}

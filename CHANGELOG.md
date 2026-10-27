@@ -4,6 +4,8 @@
 
 ### Added
 
+- `mdl tui`: `x` / `Delete` removes the selected album, or the artist with all its albums, from the library after
+  a y/n confirmation, and saves the library immediately. Files already downloaded are not touched.
 - Plain `mdl` downloads `./mdl.json` when it exists (the original script's normal mode); `mdl -f FILE` / `mdl download
   --file FILE` names another batch file and `-d` / `--delete` removes it after a fully successful run. A single-artist
   file downloads into `<dir>/<Album>/` (the directory is the artist's folder), a multi-artist file into

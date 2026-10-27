@@ -2,8 +2,9 @@
 // (github.com/charmbracelet/bubbletea) with Lip Gloss styling.
 //
 // Three panes - artists, albums, details - are driven by keyboard or mouse.
-// Model is a plain tea.Model with no I/O of its own, so it is unit tested by
-// feeding it messages and inspecting View(); Run (tui.go) starts the program.
+// Model is a plain tea.Model whose only I/O is the save callback it is given
+// (used after a delete), so it is unit tested by feeding it messages and
+// inspecting View(); Run (tui.go) starts the program.
 package tui
 
 import (
@@ -87,16 +88,22 @@ type Model struct {
 	filtering bool
 	status    string
 
+	// A delete waiting for y/n. delAlbum is empty for a whole artist.
+	confirming          bool
+	delArtist, delAlbum string
+	save                func() error
+
 	done   bool
 	result Result
 }
 
 var _ tea.Model = (*Model)(nil)
 
-// NewModel builds a model for lib. The size arrives with the first
-// tea.WindowSizeMsg.
-func NewModel(lib *library.Library) *Model {
-	m := &Model{lib: lib, all: lib.Artists()}
+// NewModel builds a model for lib. save is called after every delete to
+// persist lib; nil keeps changes in memory only. The size arrives with the
+// first tea.WindowSizeMsg.
+func NewModel(lib *library.Library, save func() error) *Model {
+	m := &Model{lib: lib, all: lib.Artists(), save: save}
 	m.applyFilter()
 	return m
 }
@@ -246,6 +253,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.String() == "ctrl+c":
 			m.done = true
+		case m.confirming:
+			m.confirmKey(msg)
 		case m.filtering:
 			m.filterKey(msg)
 		default:
@@ -296,6 +305,8 @@ func (m *Model) normalKey(msg tea.KeyMsg) {
 		m.filtering = true
 	case "d":
 		m.requestDownload()
+	case "x", "delete":
+		m.requestDelete()
 	}
 }
 
@@ -340,6 +351,73 @@ func (m *Model) requestDownload() {
 	m.result, m.done = r, true
 }
 
+// requestDelete asks to confirm deleting the selected album (albums pane) or
+// artist (artists pane).
+func (m *Model) requestDelete() {
+	artist := m.SelectedArtist()
+	if artist == "" {
+		m.status = "nothing selected"
+		return
+	}
+	m.delArtist, m.delAlbum = artist, ""
+	if m.focus == paneAlbums {
+		m.delAlbum = m.SelectedAlbum()
+	}
+	m.confirming = true
+}
+
+func (m *Model) confirmKey(msg tea.KeyMsg) {
+	m.confirming = false
+	if k := msg.String(); k != "y" && k != "Y" {
+		m.status = "nothing deleted"
+		return
+	}
+	m.deleteSelection()
+}
+
+// deleteSelection removes the confirmed artist or album and saves. If saving
+// fails the library is put back as it was so memory matches the file.
+func (m *Model) deleteSelection() {
+	backup := m.lib.Clone()
+	what := cleanText(m.delArtist)
+	if m.delAlbum == "" {
+		m.lib.RemoveArtist(m.delArtist)
+	} else {
+		m.lib.Remove(m.delArtist, m.delAlbum)
+		what = cleanText(m.delAlbum) + " by " + what
+	}
+	if m.save != nil {
+		if err := m.save(); err != nil {
+			*m.lib = *backup
+			m.status = "delete failed: " + cleanText(err.Error())
+			return
+		}
+	}
+	m.refresh()
+	m.status = "deleted " + what
+}
+
+// refresh reloads the lists after the library changed, keeping the selection
+// at the same positions where possible.
+func (m *Model) refresh() {
+	artistSel, albumSel, focus := m.artistSel, m.albumSel, m.focus
+	m.all = m.lib.Artists()
+	m.applyFilter()
+	if m.SelectedArtist() != m.delArtist {
+		// The artist is gone: select whichever one moved into its place.
+		m.artistSel = clamp(artistSel, 0, len(m.artists)-1)
+		m.artistTop = ensureVisible(m.artistSel, m.artistTop, m.innerRows())
+		m.loadAlbums()
+		m.focus = paneArtists
+		return
+	}
+	m.setAlbum(albumSel)
+	m.focus = focus
+	if len(m.albums) == 0 {
+		m.focus = paneArtists
+	}
+}
+
 // --- layout & mouse -------------------------------------------------------
 
 type rect struct{ x, y, w, h int }
@@ -370,7 +448,7 @@ func (m *Model) rowAt(r rect, top, n, y int) (int, bool) {
 }
 
 func (m *Model) mouse(msg tea.MouseMsg) {
-	if msg.Action != tea.MouseActionPress {
+	if msg.Action != tea.MouseActionPress || m.confirming {
 		return
 	}
 	ar, br, _ := m.layout()
@@ -538,7 +616,7 @@ func (m *Model) detailLines(width int) []string {
 		add(styAccent, "Folder")
 		add(plain, downloader.SanitizeName(artist)+"/"+downloader.SanitizeName(album))
 		blank()
-		add(styDim, "press d to download this album")
+		add(styDim, "press d to download this album, x to delete it")
 		return lines
 	}
 
@@ -562,7 +640,7 @@ func (m *Model) detailLines(width int) []string {
 	add(styAccent, "Folder")
 	add(plain, downloader.SanitizeName(artist)+"/")
 	blank()
-	add(styDim, "press d to download every album")
+	add(styDim, "press d to download every album, x to delete the artist")
 	return lines
 }
 
@@ -630,8 +708,15 @@ func (m *Model) header() string {
 }
 
 func (m *Model) footer() string {
-	text := " ↑↓ move   ←→ pane   click select   / filter   d download   q quit"
+	text := " ↑↓ move   ←→ pane   click select   / filter   d download   x delete   q quit"
 	switch {
+	case m.confirming:
+		what := "album " + cleanText(m.delAlbum) + " by " + cleanText(m.delArtist)
+		if m.delAlbum == "" {
+			n := len(m.lib.Albums(m.delArtist))
+			what = fmt.Sprintf("artist %s and its %d album%s", cleanText(m.delArtist), n, plural(n))
+		}
+		return styAccent.Width(m.w).Render(ansi.Truncate(" delete "+what+"? y/n", m.w, "…"))
 	case m.status != "":
 		text = " " + m.status
 	case m.filtering:
