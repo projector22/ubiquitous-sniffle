@@ -75,6 +75,7 @@ var downloadOpts = []Opt{
 	{'s', "spotify", "", "Force Spotify (spotdl). Library albums use their Spotify link and fail if they have none; URLs are handed to spotdl whatever their host."},
 	{'y', "youtube", "", "Force YouTube (yt-dlp). Library albums use their YouTube link and fail if they have none; URLs are handed to yt-dlp whatever their host. Cannot be combined with --spotify."},
 	{'b', "beet", "", "After downloading, run `beet import -C` on each downloaded folder so beets can tag and organise it."},
+	{'p', "audio", "LIST", "Where spotdl gets the audio for Spotify links, tried in order, e.g. \"bandcamp youtube-music\". Providers: youtube-music, youtube, bandcamp, soundcloud, piped. Overrides `mdl config audio`; spotdl's default is youtube-music. yt-dlp is not affected."},
 }
 
 type command struct {
@@ -104,6 +105,7 @@ type invocation struct {
 	configPath string
 	musicDir   string
 	dry        bool
+	audio      []string // spotdl audio providers; nil for spotdl's default
 }
 
 func (a *App) commands() []command {
@@ -173,7 +175,8 @@ func (a *App) commands() []command {
 			Name:    "tui",
 			Summary: "Browse the library interactively",
 			Long: "Opens a three-pane browser (artists, albums, details). Use the arrow keys or j/k/h/l, or click with the mouse; " +
-				"press / to filter, d to download the selected album (or every album of the selected artist), and q to quit. " +
+				"press / to filter, d to download the selected album (or every album of the selected artist), " +
+				"x to delete it from the library (after a y/n confirmation), and q to quit. " +
 				"After you press d the TUI closes and the download runs.",
 			Opts:     downloadOpts,
 			Examples: []string{"mdl tui", "mdl tui -b"},
@@ -196,7 +199,9 @@ func (a *App) commands() []command {
 				"see --config). With no arguments, lists every setting, its value and where the value comes from. " +
 				"With KEY, prints its value. With KEY and VALUE, saves it. With --unset, removes it. " +
 				"Settings: editor - the command that `mdl edit` and `mdl -c` run, with arguments and quotes if needed. " +
-				"The editor is chosen from: --editor, the config file, $VISUAL, $EDITOR, nano.",
+				"The editor is chosen from: --editor, the config file, $VISUAL, $EDITOR, nano. " +
+				"audio - where spotdl gets the audio for Spotify links, tried in order (youtube-music, youtube, bandcamp, " +
+				"soundcloud, piped); chosen from --audio, the config file, then spotdl's default (youtube-music).",
 			Opts: []Opt{
 				{'u', "unset", "", "Remove KEY from the config file so the environment or the default applies again."},
 			},
@@ -206,6 +211,7 @@ func (a *App) commands() []command {
 				`mdl config editor "'/opt/My Editor/ed' -w"   quote paths that contain spaces`,
 				"mdl config editor                        print the editor mdl will use",
 				"mdl config --unset editor                go back to $VISUAL / $EDITOR / nano",
+				`mdl config audio "bandcamp youtube-music"   try Bandcamp first, then YouTube Music`,
 			},
 			run: a.cmdConfig,
 		},
@@ -522,6 +528,9 @@ func (a *App) cmdDownload(inv *invocation) int {
 	if err != nil {
 		return a.usageErr(err)
 	}
+	if inv.audio, err = a.audioProviders(inv); err != nil {
+		return a.fail("%v", err)
+	}
 
 	toLibrary := inv.vals.Bool("to-library")
 	file := inv.vals.String("file")
@@ -788,7 +797,7 @@ func (a *App) noteArtist(inv *invocation, path, artist string, usedDefault bool)
 }
 
 func (a *App) newDownloader(inv *invocation, root string) *downloader.Downloader {
-	return &downloader.Downloader{Runner: a.runnerFor(inv), Root: root, Out: a.Stdout, DryRun: inv.dry}
+	return &downloader.Downloader{Runner: a.runnerFor(inv), Root: root, Out: a.Stdout, DryRun: inv.dry, Audio: inv.audio}
 }
 
 func (a *App) runJobs(inv *invocation, jobs []downloader.Job, forced downloader.Tool) int {
@@ -920,6 +929,9 @@ func (a *App) cmdTUI(inv *invocation) int {
 	forced, err := forcedTool(inv.vals)
 	if err != nil {
 		return a.usageErr(err)
+	}
+	if inv.audio, err = a.audioProviders(inv); err != nil {
+		return a.fail("%v", err)
 	}
 	lib, code := a.loadLibrary(inv)
 	if code != exitOK {

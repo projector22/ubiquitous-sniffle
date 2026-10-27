@@ -35,6 +35,7 @@ mdl https://open.spotify.com/album/...            # spotdl, into the current dir
 mdl https://music.youtube.com/playlist?list=...   # yt-dlp, into the current directory
 mdl -b https://open.spotify.com/album/...         # ...then run beet on it
 mdl --youtube URL                                 # force yt-dlp (or --spotify to force spotdl)
+mdl -p "bandcamp youtube-music" https://open.spotify.com/album/...   # spotdl, audio from Bandcamp if it has it
 ```
 
 Every URL that downloads successfully is also **recorded in your library file** (see below), so the library
@@ -214,6 +215,7 @@ mdl config editor "code --wait"         # always use this editor (arguments allo
 mdl config editor "'/opt/My Editor/ed' -w"   # quote paths that contain spaces
 mdl config editor                       # print the editor mdl will use
 mdl config --unset editor               # forget it again
+mdl config audio "bandcamp youtube-music"   # spotdl: get audio from Bandcamp, else YouTube Music
 ```
 
 The **editor** is used by `mdl edit` and `mdl -c`. It is chosen from, first match wins:
@@ -223,6 +225,13 @@ The **editor** is used by `mdl edit` and `mdl -c`. It is chosen from, first matc
 3. `$VISUAL`
 4. `$EDITOR`
 5. `nano`
+
+The **audio** setting is where spotdl gets the audio for Spotify links (its `--audio` option): one or more of
+`youtube-music`, `youtube`, `bandcamp`, `soundcloud`, `piped`, tried in order. `--audio LIST` (`-p`) overrides it
+for one run on `download`, `tui` and plain `mdl`; with neither, spotdl uses its default, `youtube-music`. The links
+in the library stay Spotify links: spotdl takes the track list and tags from Spotify and only the audio comes from
+Bandcamp. A track that is not on Bandcamp falls through to the next provider in the list, so end the list with
+`youtube-music` or `youtube`. yt-dlp downloads ignore the setting.
 
 As with git's `core.editor`, a saved choice beats the environment variables. mdl warns, but still saves, if the
 command is not on your `PATH`. A config file that cannot be read (bad JSON, an unknown key) is reported and never

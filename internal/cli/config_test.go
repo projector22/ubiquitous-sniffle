@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/projector22/ubiquitous-sniffle/internal/library"
+	"github.com/projector22/ubiquitous-sniffle/internal/tui"
 )
 
 func TestSplitCommand(t *testing.T) {
@@ -333,6 +336,62 @@ func TestHelpDocumentsConfig(t *testing.T) {
 		}
 		if !strings.Contains(help, "mdl config") {
 			t.Errorf("%s help should point at `mdl config`", name)
+		}
+	}
+}
+
+func TestAudioProviders(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t)
+	spotdlArgs := func() string {
+		t.Helper()
+		for _, c := range h.fake.Calls {
+			if c.Name == "spotdl" {
+				return strings.Join(c.Args, " ")
+			}
+		}
+		t.Fatalf("spotdl not run: %+v", h.fake.Calls)
+		return ""
+	}
+
+	h.expect(t, 0, "config")
+	if !strings.Contains(h.out.String(), "audio = youtube-music   (spotdl default)") {
+		t.Errorf("list:\n%s", h.out)
+	}
+	h.expect(t, 0, "download", "-a", "AC/DC")
+	if got := spotdlArgs(); strings.Contains(got, "--audio") {
+		t.Errorf("default must leave spotdl alone: %s", got)
+	}
+
+	h.expect(t, 2, "config", "audio", "bandcamp spotify")
+	h.expect(t, 0, "config", "audio", "Bandcamp, youtube-music bandcamp")
+	if raw, _ := os.ReadFile(h.cfgPath()); !strings.Contains(string(raw), `"audio": "bandcamp youtube-music"`) {
+		t.Errorf("config file = %q", raw)
+	}
+	h.expect(t, 0, "download", "-a", "AC/DC")
+	if got := spotdlArgs(); !strings.HasPrefix(got, "--audio bandcamp youtube-music --bitrate 128k") {
+		t.Errorf("config not used: %s", got)
+	}
+	// --audio overrides the config, also for plain `mdl URL`.
+	h.expect(t, 0, "-p", "soundcloud,youtube", "https://open.spotify.com/album/z")
+	if got := spotdlArgs(); !strings.HasPrefix(got, "--audio soundcloud youtube --bitrate") {
+		t.Errorf("--audio not used: %s", got)
+	}
+	// yt-dlp is unaffected.
+	h.expect(t, 0, "download", "-y", "-a", "Daft Punk", "-A", "Homework")
+	if c := h.fake.Calls[0]; c.Name != "yt-dlp" || strings.Contains(strings.Join(c.Args, " "), "--audio ") {
+		t.Errorf("call = %+v", c)
+	}
+
+	// A bad value stops before anything runs (or the TUI opens).
+	h.app.TUI = func(*library.Library, func() error) (tui.Result, error) {
+		t.Error("TUI opened despite a bad --audio")
+		return tui.Result{}, nil
+	}
+	for _, args := range [][]string{{"download", "--audio", "napster"}, {"tui", "-p", "napster"}, {"download", "-p", ","}} {
+		h.expect(t, 1, args...)
+		if len(h.fake.Calls) != 0 || !strings.Contains(h.err.String(), "invalid audio providers") {
+			t.Errorf("mdl %v: calls %+v, stderr %q", args, h.fake.Calls, h.err)
 		}
 	}
 }

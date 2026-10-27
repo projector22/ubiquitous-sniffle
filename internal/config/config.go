@@ -2,7 +2,8 @@
 // the library so that preferences and data never share a file.
 //
 //	{
-//	  "editor": "code --wait"
+//	  "editor": "code --wait",
+//	  "audio": "bandcamp youtube-music"
 //	}
 package config
 
@@ -21,15 +22,18 @@ import (
 // Setting names accepted by Get, Set and Unset.
 const (
 	KeyEditor = "editor"
+	KeyAudio  = "audio"
 )
 
 // Keys lists every known setting.
-var Keys = []string{KeyEditor}
+var Keys = []string{KeyEditor, KeyAudio}
 
 // Config is the stored settings. The zero value means "nothing configured".
 type Config struct {
 	// Editor is the command (with optional arguments) used to edit files.
 	Editor string `json:"editor,omitempty"`
+	// Audio lists where spotdl gets audio from, e.g. "bandcamp youtube-music".
+	Audio string `json:"audio,omitempty"`
 }
 
 // Known reports whether key is a setting name.
@@ -97,6 +101,8 @@ func (c *Config) Get(key string) (value string, known bool) {
 	switch key {
 	case KeyEditor:
 		return c.Editor, true
+	case KeyAudio:
+		return c.Audio, true
 	}
 	return "", false
 }
@@ -114,6 +120,8 @@ func (c *Config) Set(key, value string) error {
 	switch key {
 	case KeyEditor:
 		c.Editor = value
+	case KeyAudio:
+		c.Audio = value
 	}
 	return nil
 }
@@ -127,6 +135,8 @@ func (c *Config) Unset(key string) (had bool, err error) {
 	switch key {
 	case KeyEditor:
 		c.Editor = ""
+	case KeyAudio:
+		c.Audio = ""
 	}
 	return old != "", nil
 }

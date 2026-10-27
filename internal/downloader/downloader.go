@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -44,14 +45,48 @@ func ToolForURL(raw string) Tool {
 	return Spotdl
 }
 
+// AudioProviders are the places spotdl can take a Spotify track's audio from
+// (its --audio option). spotdl uses youtube-music when none are given.
+var AudioProviders = []string{"youtube-music", "youtube", "bandcamp", "soundcloud", "piped"}
+
+// ParseAudio reads a list of audio providers separated by spaces or commas,
+// such as "bandcamp youtube-music". spotdl tries them in order, so the order
+// is kept; duplicates are dropped. An empty list yields nil.
+func ParseAudio(s string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		if !slices.Contains(AudioProviders, p) {
+			return nil, fmt.Errorf("unknown audio provider %q (known: %s)", p, strings.Join(AudioProviders, ", "))
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 // Command returns the program and arguments that download rawURL with t.
-// Arguments are passed as an argv slice, never through a shell, so URLs with
-// '&' or spaces are safe.
-func Command(t Tool, rawURL string) (string, []string) {
+// audio lists spotdl's audio providers (nil for its default); yt-dlp ignores
+// it. Arguments are passed as an argv slice, never through a shell, so URLs
+// with '&' or spaces are safe.
+func Command(t Tool, rawURL string, audio []string) (string, []string) {
 	if t == YtDlp {
 		return ytdlp("%(playlist_index)02d - %(artist)s - %(title)s.%(ext)s", rawURL)
 	}
-	return "spotdl", []string{"--bitrate", "128k", "download", rawURL}
+	return "spotdl", spotdlArgs(audio, "download", rawURL)
+}
+
+// spotdlArgs puts --audio first: it takes any number of values, so the
+// --bitrate that follows is what ends the list (otherwise it would swallow
+// "download" and the URL).
+func spotdlArgs(audio []string, rest ...string) []string {
+	var args []string
+	if len(audio) > 0 {
+		args = append(append(args, "--audio"), audio...)
+	}
+	return append(append(args, "--bitrate", "128k"), rest...)
 }
 
 func ytdlp(outputTemplate, rawURL string) (string, []string) {
@@ -84,7 +119,8 @@ const (
 // from album artist to artist to creator and then to "Unknown Artist", and
 // from album to playlist title to "Unknown Album". spotdl always knows both.
 // Track numbers are zero-padded when the source is a playlist or album.
-func LibraryCommand(t Tool, rawURL, artist, album string) (string, []string) {
+// audio is as for Command.
+func LibraryCommand(t Tool, rawURL, artist, album string, audio []string) (string, []string) {
 	if t == YtDlp {
 		artistPart := "%(album_artist,artist,creator|" + UnknownArtist + ")s"
 		if artist != "" {
@@ -104,11 +140,10 @@ func LibraryCommand(t Tool, rawURL, artist, album string) (string, []string) {
 	if album != "" {
 		albumPart = braces.Replace(SanitizeName(album))
 	}
-	return "spotdl", []string{
-		"--bitrate", "128k",
-		"--output", artistPart + "/" + albumPart + "/{track-number} - {title}.{output-ext}",
+	return "spotdl", spotdlArgs(audio,
+		"--output", artistPart+"/"+albumPart+"/{track-number} - {title}.{output-ext}",
 		"download", rawURL,
-	}
+	)
 }
 
 // SelectSource chooses which of an entry's links to use. When forced is Auto,
@@ -258,6 +293,7 @@ type Downloader struct {
 	Root   string    // top-level music directory
 	Out    io.Writer // progress messages
 	DryRun bool      // skip creating directories
+	Audio  []string  // spotdl audio providers in order; nil for spotdl's default
 }
 
 func (d *Downloader) logf(format string, a ...any) {
@@ -289,7 +325,7 @@ func (d *Downloader) run(ctx context.Context, tool Tool, rawURL, dir string) err
 	if err := d.mkdir(dir); err != nil {
 		return err
 	}
-	name, args := Command(tool, rawURL)
+	name, args := Command(tool, rawURL, d.Audio)
 	return d.Runner.Run(ctx, dir, name, args...)
 }
 
@@ -343,7 +379,7 @@ func (d *Downloader) DownloadURLToLibrary(ctx context.Context, rawURL string, fo
 	}
 	before := snapshotAlbumDirs(d.Root)
 	d.logf("==> %s (%s, into the library)", rawURL, tool)
-	name, args := LibraryCommand(tool, rawURL, artist, album)
+	name, args := LibraryCommand(tool, rawURL, artist, album, d.Audio)
 	err := d.Runner.Run(ctx, d.Root, name, args...)
 
 	var changed []string
@@ -395,7 +431,7 @@ func (d *Downloader) DownloadJob(ctx context.Context, j Job, forced Tool) (strin
 	if err := d.mkdir(dir); err != nil {
 		return "", err
 	}
-	name, args := Command(tool, link)
+	name, args := Command(tool, link, d.Audio)
 	return dir, d.Runner.Run(ctx, dir, name, args...)
 }
 

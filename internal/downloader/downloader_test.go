@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,11 +51,11 @@ func TestToolForURL(t *testing.T) {
 }
 
 func TestCommand(t *testing.T) {
-	name, args := Command(Spotdl, "u&v")
+	name, args := Command(Spotdl, "u&v", nil)
 	if name != "spotdl" || strings.Join(args, " ") != "--bitrate 128k download u&v" {
 		t.Errorf("spotdl: %s %v", name, args)
 	}
-	name, args = Command(YtDlp, "U")
+	name, args = Command(YtDlp, "U", nil)
 	if name != "yt-dlp" || args[len(args)-1] != "U" {
 		t.Errorf("yt-dlp: %s %v", name, args)
 	}
@@ -286,7 +287,7 @@ func TestBeet(t *testing.T) {
 }
 
 func TestLibraryCommandYtDlp(t *testing.T) {
-	name, args := LibraryCommand(YtDlp, "https://music.youtube.com/playlist?list=x", "", "")
+	name, args := LibraryCommand(YtDlp, "https://music.youtube.com/playlist?list=x", "", "", nil)
 	if name != "yt-dlp" || args[len(args)-1] != "https://music.youtube.com/playlist?list=x" {
 		t.Fatalf("%s %v", name, args)
 	}
@@ -303,19 +304,48 @@ func TestLibraryCommandYtDlp(t *testing.T) {
 		}
 	}
 	// Explicit names replace the metadata fields and are sanitised / escaped.
-	_, args = LibraryCommand(YtDlp, "u", "AC/DC", "100% Rock: Live")
+	_, args = LibraryCommand(YtDlp, "u", "AC/DC", "100% Rock: Live", nil)
 	if got := argAfter(t, args, "-o"); !strings.HasPrefix(got, "AC_DC/100%% Rock_ Live/") {
 		t.Errorf("template = %q", got)
 	}
 	// Only one of the two given: the other still comes from metadata.
-	_, args = LibraryCommand(YtDlp, "u", "Daft Punk", "")
+	_, args = LibraryCommand(YtDlp, "u", "Daft Punk", "", nil)
 	if got := argAfter(t, args, "-o"); !strings.HasPrefix(got, "Daft Punk/%(album,playlist_title|Unknown Album)s/") {
 		t.Errorf("template = %q", got)
 	}
 }
 
+func TestParseAudio(t *testing.T) {
+	got, err := ParseAudio(" Bandcamp, youtube-music  youtube,,bandcamp ")
+	if err != nil || strings.Join(got, " ") != "bandcamp youtube-music youtube" {
+		t.Errorf("ParseAudio = %v, %v", got, err)
+	}
+	if got, err := ParseAudio(" , "); err != nil || got != nil {
+		t.Errorf("empty list = %v, %v", got, err)
+	}
+	if _, err := ParseAudio("bandcamp spotify"); err == nil || !strings.Contains(err.Error(), `"spotify"`) {
+		t.Errorf("unknown provider error = %v", err)
+	}
+}
+
+func TestSpotdlAudioProviders(t *testing.T) {
+	audio := []string{"bandcamp", "youtube-music"}
+	// --audio takes many values, so --bitrate must follow it to end the list.
+	_, args := Command(Spotdl, "u", audio)
+	if got := strings.Join(args, " "); got != "--audio bandcamp youtube-music --bitrate 128k download u" {
+		t.Errorf("spotdl args = %s", got)
+	}
+	_, args = LibraryCommand(Spotdl, "u", "", "", audio)
+	if got := strings.Join(args[:4], " "); got != "--audio bandcamp youtube-music --bitrate" || args[len(args)-1] != "u" {
+		t.Errorf("library args = %v", args)
+	}
+	if _, args = Command(YtDlp, "u", audio); slices.Contains(args, "--audio") {
+		t.Error("yt-dlp must not get --audio")
+	}
+}
+
 func TestLibraryCommandSpotdl(t *testing.T) {
-	name, args := LibraryCommand(Spotdl, "https://open.spotify.com/album/a", "", "")
+	name, args := LibraryCommand(Spotdl, "https://open.spotify.com/album/a", "", "", nil)
 	if name != "spotdl" || args[len(args)-2] != "download" || args[len(args)-1] != "https://open.spotify.com/album/a" {
 		t.Fatalf("%s %v", name, args)
 	}
@@ -325,7 +355,7 @@ func TestLibraryCommandSpotdl(t *testing.T) {
 	if argAfter(t, args, "--bitrate") != "128k" {
 		t.Error("bitrate lost")
 	}
-	_, args = LibraryCommand(Spotdl, "u", "AC/DC {x}", "Back: in Black")
+	_, args = LibraryCommand(Spotdl, "u", "AC/DC {x}", "Back: in Black", nil)
 	if got := argAfter(t, args, "--output"); !strings.HasPrefix(got, "AC_DC (x)/Back_ in Black/{track-number}") {
 		t.Errorf("template = %q", got)
 	}

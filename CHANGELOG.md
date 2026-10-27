@@ -4,6 +4,9 @@
 
 ### Added
 
+- Bandcamp as an audio source for spotdl: `mdl config audio "bandcamp youtube-music"` or `-p` / `--audio LIST` on
+  `download`, `tui` and plain `mdl` passes `--audio` to spotdl, so Spotify links are matched to Bandcamp audio first,
+  falling back to the next provider. Also accepts `youtube`, `soundcloud` and `piped`.
 - `mdl tui`: `x` / `Delete` removes the selected album, or the artist with all its albums, from the library after
   a y/n confirmation, and saves the library immediately. Files already downloaded are not touched.
 - Plain `mdl` downloads `./mdl.json` when it exists (the original script's normal mode); `mdl -f FILE` / `mdl download

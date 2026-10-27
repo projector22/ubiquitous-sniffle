@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/projector22/ubiquitous-sniffle/internal/config"
+	"github.com/projector22/ubiquitous-sniffle/internal/downloader"
 )
 
 // defaultEditor is used when nothing else names an editor.
@@ -119,11 +120,49 @@ func indexRune(rs []rune, want rune, from int) int {
 	return -1
 }
 
-// settingFor resolves any known setting. Only the editor exists so far.
+// defaultAudio is what spotdl uses when it is not given --audio.
+const defaultAudio = "youtube-music"
+
+// audioSetting resolves where spotdl gets audio from: --audio, then the
+// config file, then spotdl's own default.
+func (a *App) audioSetting(inv *invocation) (setting, error) {
+	if v := strings.TrimSpace(inv.vals.String("audio")); v != "" {
+		return setting{v, "--audio"}, nil
+	}
+	cfg, err := config.Load(inv.configPath)
+	if err != nil {
+		return setting{}, err
+	}
+	if v := strings.TrimSpace(cfg.Audio); v != "" {
+		return setting{v, "config file"}, nil
+	}
+	return setting{defaultAudio, "spotdl default"}, nil
+}
+
+// audioProviders returns the providers to pass to spotdl, or nil to leave
+// spotdl on its default.
+func (a *App) audioProviders(inv *invocation) ([]string, error) {
+	s, err := a.audioSetting(inv)
+	if err != nil || s.Source == "spotdl default" {
+		return nil, err
+	}
+	audio, err := downloader.ParseAudio(s.Value)
+	if err == nil && audio == nil {
+		err = errors.New("no providers given")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("invalid audio providers %q (from %s): %w", s.Value, s.Source, err)
+	}
+	return audio, nil
+}
+
+// settingFor resolves any known setting.
 func (a *App) settingFor(inv *invocation, key string) (setting, error) {
 	switch key {
 	case config.KeyEditor:
 		return a.editorSetting(inv)
+	case config.KeyAudio:
+		return a.audioSetting(inv)
 	}
 	return setting{}, fmt.Errorf("unknown setting %q", key)
 }
@@ -189,6 +228,13 @@ func (a *App) setConfig(inv *invocation, key, value string) int {
 		if _, err := a.LookPath(parts[0]); err != nil {
 			fmt.Fprintf(a.Stderr, "mdl: note: %q was not found on your PATH (saving it anyway)\n", parts[0])
 		}
+	}
+	if key == config.KeyAudio {
+		audio, err := downloader.ParseAudio(value)
+		if err != nil {
+			return a.usageErr(fmt.Errorf("config: %w", err))
+		}
+		value = strings.Join(audio, " ") // normalised: lower case, spaces, no duplicates
 	}
 	// A config file that cannot be read is reported rather than overwritten.
 	cfg, err := config.Load(inv.configPath)

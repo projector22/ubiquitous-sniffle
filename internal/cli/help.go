@@ -119,9 +119,10 @@ func (a *App) topHelp() string {
   mdl --youtube https://example.com/...      force yt-dlp (or --spotify to force spotdl)
   mdl -t https://music.youtube.com/playlist?list=...   file it under <Artist>/<Album>/ in the music dir
   mdl config editor "code --wait"           save the editor that mdl edit and mdl -c use
+  mdl config audio "bandcamp youtube-music" let spotdl get audio from Bandcamp first
   mdl add -a "Daft Punk" -A Discovery -u https://open.spotify.com/album/...
   mdl list
-  mdl tui                                   browse; press d to download the selection
+  mdl tui                                   browse; press d to download the selection, x to delete it
   mdl download                              download every album in the library
   mdl download -a "Daft Punk" -sb           one artist, force Spotify links, then run beet
   mdl download https://music.youtube.com/playlist?list=...
